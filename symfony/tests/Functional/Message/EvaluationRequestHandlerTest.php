@@ -149,9 +149,8 @@ class EvaluationRequestHandlerTest extends KernelTestCase
 
         $message = new EvaluateSubmissionMessage('00000000-0000-0000-0000-000000000000');
 
-        // Should not throw, just log and return
+        // Clean code: should throw Unrecoverable for missing entity
+        $this->expectException(\Symfony\Component\Messenger\Exception\UnrecoverableMessageHandlingException::class);
         $handler->__invoke($message);
-
-        $this->assertTrue(true); // If we reach here, it handled gracefully
     }
 }
