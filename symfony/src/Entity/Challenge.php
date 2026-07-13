@@ -16,21 +16,22 @@ class Challenge
 {
     #[ORM\Id]
     #[ORM\Column(type: 'uuid', unique: true)]
-    private ?Uuid $id = null;
+    private Uuid $id;
 
     #[ORM\Column(length: 255)]
     #[Assert\NotBlank]
     #[Assert\Length(min: 3, max: 255)]
-    private ?string $title = null;
+    private string $title = '';
 
     #[ORM\Column(type: Types::TEXT)]
     #[Assert\NotBlank]
     #[Assert\Length(min: 20)]
-    private ?string $description = null;
+    private string $description = '';
 
     #[ORM\Column]
-    private ?\DateTimeImmutable $createdAt = null;
+    private \DateTimeImmutable $createdAt;
 
+    /** @var Collection<int, Submission> */
     #[ORM\OneToMany(targetEntity: Submission::class, mappedBy: 'challenge')]
     private Collection $submissions;
 
@@ -41,12 +42,18 @@ class Challenge
         $this->submissions = new ArrayCollection();
     }
 
-    public function getId(): ?Uuid
+    // --- Intention-revealing, non-nullable getters for invariants ---
+    public function getId(): Uuid
     {
         return $this->id;
     }
 
-    public function getTitle(): ?string
+    public function getIdAsString(): string
+    {
+        return $this->id->toRfc4122();
+    }
+
+    public function getTitle(): string
     {
         return $this->title;
     }
@@ -57,7 +64,7 @@ class Challenge
         return $this;
     }
 
-    public function getDescription(): ?string
+    public function getDescription(): string
     {
         return $this->description;
     }
@@ -68,15 +75,9 @@ class Challenge
         return $this;
     }
 
-    public function getCreatedAt(): ?\DateTimeImmutable
+    public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;
-    }
-
-    public function setCreatedAt(\DateTimeImmutable $createdAt): static
-    {
-        $this->createdAt = $createdAt;
-        return $this;
     }
 
     /**
@@ -91,7 +92,7 @@ class Challenge
     {
         if (!$this->submissions->contains($submission)) {
             $this->submissions->add($submission);
-            $submission->setChallenge($this);
+            $submission->associateWithChallenge($this);
         }
         return $this;
     }
@@ -100,7 +101,7 @@ class Challenge
     {
         if ($this->submissions->removeElement($submission)) {
             if ($submission->getChallenge() === $this) {
-                $submission->setChallenge(null);
+                $submission->associateWithChallenge(null);
             }
         }
         return $this;
@@ -108,6 +109,6 @@ class Challenge
 
     public function __toString(): string
     {
-        return $this->title ?? 'Challenge';
+        return $this->title !== '' ? $this->title : 'Challenge';
     }
 }

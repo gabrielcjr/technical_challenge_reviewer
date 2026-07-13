@@ -23,6 +23,14 @@ enum SubmissionStatus: string
 
     public function isFinal(): bool
     {
-        return in_array($this, [self::APPROVED, self::REJECTED, self::FAILED], true);
+        return match ($this) {
+            self::APPROVED, self::REJECTED, self::FAILED => true,
+            self::PENDING, self::PROCESSING => false,
+        };
+    }
+
+    public function canBeRetried(): bool
+    {
+        return $this === self::FAILED;
     }
 }
