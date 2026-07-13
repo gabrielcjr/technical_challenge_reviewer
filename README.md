@@ -3,7 +3,7 @@
 A full-stack Dockerized system that receives a GitHub user's repository challenge response and evaluates it via AI.
 
 - **PHP 8.4 + Symfony 7.3** - Main API & UI, persistence, Messenger (Doctrine transport) for reliable async processing
-- **Python 3.12 + FastAPI** - Evaluator microservice, clones repo, LangChain with dual LLM (Grok primary + Gemini fallback)
+- **Python 3.12 + FastAPI** - Evaluator microservice, clones repo, LangChain with dual LLM (Groq primary + Gemini fallback)
 - **Postgres 17** - Stores challenges, submissions, evaluation results, and Messenger messages (no RabbitMQ needed)
 - **Nginx** - Reverse proxy
 - **Twig UI** with polling status page
@@ -23,7 +23,7 @@ User -> Nginx:8080 -> PHP-FPM Symfony
            - git clone --depth 1
            - file_collector: walk ignoring node_modules, vendor, .git etc, collect tree + truncated contents (25k chars)
            - prompts: build_evaluation_prompt
-           - llm_provider: try Grok llama-3.3-70b-versatile, on failure Gemini gemini-1.5-flash via LangChain, JsonOutputParser, fallback heuristic if no keys
+            - llm_provider: try Groq llama-3.3-70b-versatile, on failure Gemini gemini-2.0-flash-lite via LangChain, JsonOutputParser, fallback heuristic if no keys
            - result {approved: bool, summary, improvements[], reasoning}
            - callback POST to Symfony /api/internal/evaluation-result with tenacity retry 5x (2s...30s exponential)
            -> Logs failed callbacks to /tmp/failed_callbacks.jsonl for manual replay
@@ -59,7 +59,7 @@ For high throughput (>1k msg/min) RabbitMQ would give better performance, but fo
 
 - Docker & Docker Compose v5+
 - Free LLM API keys (optional for testing, but required for real AI evaluation):
-  - Grok: https://console.grok.com/keys (generous free tier, very fast)
+  - Groq: https://console.groq.com/keys (generous free tier, very fast)
   - Gemini: https://aistudio.google.com/app/apikey (free quota)
 
 ### Setup
@@ -71,7 +71,7 @@ cd technical_challenge_reviewer
 # Copy env and set your keys
 cp .env.example .env
 # Edit .env and set:
-# GROK_API_KEY=gsk_...
+# GROQ_API_KEY=gsk_...
 # GEMINI_API_KEY=...
 # CALLBACK_TOKEN=some_random_secret
 
@@ -243,9 +243,9 @@ APP_SECRET
 PYTHON_EVALUATOR_URL=http://python-evaluator:8000
 SYMFONY_INTERNAL_CALLBACK_URL=http://nginx/api/internal/evaluation-result (internal docker hostname)
 CALLBACK_TOKEN=shared secret for webhook auth
-K_API_KEY=gsk_...
+GROQ_API_KEY=gsk_...
 GEMINI_API_KEY=...
-LLM_PROVIDER=auto|grok|gemini
+LLM_PROVIDER=auto|groq|gemini
 ```
 
 ## Project Structure
@@ -272,7 +272,7 @@ LLM_PROVIDER=auto|grok|gemini
 │   │   ├── repo_cloner.py
 │   │   ├── file_collector.py
 │   │   ├── prompts.py
-│   │   ├── llm_provider.py (Grok+Gemini fallback)
+│   │   ├── llm_provider.py (Groq+Gemini fallback)
 │   │   ├── evaluator.py
 │   │   └── symfony_client.py (tenacity retry)
 │   └── tests/
@@ -297,9 +297,9 @@ Return JSON: {approved, summary, improvements[], reasoning}
 
 Dual provider logic:
 
-1. If `LLM_PROVIDER=grok` -> only Grok
+1. If `LLM_PROVIDER=groq` -> only Groq
 2. If `gemini` -> only Gemini
-3. If `auto` (default) -> try Grok, on exception try Gemini, if both fail return heuristic fallback (approved false, message about missing keys) so e2e works without keys for testing.
+3. If `auto` (default) -> try Groq, on exception try Gemini, if both fail return heuristic fallback (approved false, message about missing keys) so e2e works without keys for testing.
 
 ## Security & Limitations
 

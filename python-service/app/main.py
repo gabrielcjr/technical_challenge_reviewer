@@ -27,7 +27,7 @@ _configure_logging()
 
 app = FastAPI(
     title="Challenge Evaluator",
-    description="Python microservice that evaluates GitHub repos using LangChain + Grok (xAI)/Gemini",
+    description="Python microservice that evaluates GitHub repos using LangChain + Groq (free) / Gemini (free quota)",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -52,9 +52,8 @@ async def health_check() -> HealthResponse:
         status="ok",
         service="python-evaluator",
         llm_provider=settings.llm_provider,
-        grok_configured=settings.is_grok_configured(),
+        groq_configured=settings.is_groq_configured(),
         gemini_configured=settings.is_gemini_configured(),
-        xai_configured=settings.is_grok_configured(),
     )
 
 

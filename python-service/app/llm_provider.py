@@ -8,9 +8,9 @@ from .config import settings, SENTINEL_TEST_TOKENS
 logger = logging.getLogger(__name__)
 
 # --- Constants ---
-GROK_MODEL_NAME = "grok-3-mini"
-GROK_API_BASE_URL = "https://api.x.ai/v1"
-GEMINI_MODEL_NAME = "gemini-1.5-flash"
+GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
+GROQ_API_BASE_URL = "https://api.groq.com/openai/v1"
+GEMINI_MODEL_NAME = "gemini-2.0-flash-lite"
 LLM_TEMPERATURE = 0.2
 LLM_MAX_TOKENS = 2000
 
@@ -28,8 +28,8 @@ def _is_test_token(token: str) -> bool:
     return token in SENTINEL_TEST_TOKENS
 
 
-def _is_grok_configured() -> bool:
-    return settings.is_grok_configured()
+def _is_groq_configured() -> bool:
+    return settings.is_groq_configured()
 
 
 def _is_gemini_configured() -> bool:
@@ -37,38 +37,23 @@ def _is_gemini_configured() -> bool:
 
 
 # --- LLM Factory ---
-def get_grok_llm():
-    """Create Grok (xAI) LLM via LangChain."""
-    if not _is_grok_configured():
-        raise ValueError("Grok API key not configured")
+def get_groq_llm():
+    """Create Groq LLM via OpenAI-compatible interface."""
+    if not _is_groq_configured():
+        raise ValueError("Groq API key not configured")
 
-    try:
-        from langchain_xai import ChatXAI
-
-        return ChatXAI(
-            model=GROK_MODEL_NAME,
-            api_key=settings.resolved_grok_api_key,
-            temperature=LLM_TEMPERATURE,
-            max_tokens=LLM_MAX_TOKENS,
-        )
-    except ImportError as import_error:
-        logger.warning(f"langchain-xai not available: {import_error}. Trying OpenAI-compatible fallback.")
-        return _create_grok_via_openai_compatible()
-
-
-def _create_grok_via_openai_compatible():
     try:
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
-            model=GROK_MODEL_NAME,
-            api_key=settings.resolved_grok_api_key,
-            base_url=GROK_API_BASE_URL,
+            model=GROQ_MODEL_NAME,
+            api_key=settings.resolved_groq_api_key,
+            base_url=GROQ_API_BASE_URL,
             temperature=LLM_TEMPERATURE,
             max_tokens=LLM_MAX_TOKENS,
         )
-    except Exception as fallback_error:
-        logger.error(f"OpenAI-compatible fallback failed: {fallback_error}")
+    except Exception as e:
+        logger.error(f"Failed to create Groq LLM: {e}")
         raise
 
 
@@ -183,11 +168,19 @@ def evaluate_with_llm(prompt: str) -> Tuple[Dict[str, Any], str]:
 
 def _determine_providers_to_try() -> List[str]:
     provider_env = (settings.llm_provider or "auto").lower()
-    if provider_env == "grok":
-        return ["grok"]
+    if provider_env == "groq":
+        return ["groq"]
     if provider_env == "gemini":
         return ["gemini"]
-    return ["grok", "gemini"]
+    # auto: try groq first (free, fast), then gemini
+    ordered = []
+    if _is_groq_configured():
+        ordered.append("groq")
+    if _is_gemini_configured():
+        ordered.append("gemini")
+    if not ordered:
+        ordered = ["groq", "gemini"]
+    return ordered
 
 
 def _try_providers_in_sequence(providers: List[str], prompt: str) -> Tuple[Dict[str, Any], str] | None:
@@ -207,9 +200,9 @@ def _try_providers_in_sequence(providers: List[str], prompt: str) -> Tuple[Dict[
 
 
 def _evaluate_with_single_provider(provider: str, prompt: str) -> Tuple[Dict[str, Any], str]:
-    if provider == "grok":
-        llm = get_grok_llm()
-        used_provider_name = f"grok:{GROK_MODEL_NAME}"
+    if provider == "groq":
+        llm = get_groq_llm()
+        used_provider_name = f"groq:{GROQ_MODEL_NAME}"
     else:
         llm = get_gemini_llm()
         used_provider_name = f"gemini:{GEMINI_MODEL_NAME}"
@@ -235,7 +228,7 @@ def _handle_all_providers_failed() -> Tuple[Dict[str, Any], str]:
     last_error = getattr(_try_providers_in_sequence, "last_error", None)
     logger.error(f"All LLM providers failed, last error: {last_error}. Returning fallback.")
 
-    if not settings.is_grok_configured() and not settings.is_gemini_configured():
+    if not settings.is_groq_configured() and not settings.is_gemini_configured():
         logger.warning("No LLM keys configured, using heuristic fallback evaluation")
         return _build_no_keys_fallback_result(last_error)
 
@@ -245,9 +238,9 @@ def _handle_all_providers_failed() -> Tuple[Dict[str, Any], str]:
 def _build_no_keys_fallback_result(last_error: Exception | None) -> Tuple[Dict[str, Any], str]:
     return {
         "approved": False,
-        "summary": "LLM keys not configured - evaluation skipped. Configure GROK_API_KEY or GEMINI_API_KEY for real AI evaluation.",
+        "summary": "LLM keys not configured - evaluation skipped. Configure GROQ_API_KEY or GEMINI_API_KEY for real AI evaluation.",
         "improvements": [
-            "Configure GROK_API_KEY (xAI) or GEMINI_API_KEY in .env to enable AI evaluation",
+            "Configure GROQ_API_KEY (Groq, free) or GEMINI_API_KEY in .env to enable AI evaluation",
             "Once keys are set, re-run evaluation via retry button",
         ],
         "reasoning": f"No LLM provider available. Last error: {last_error}. Set API keys to enable evaluation.",

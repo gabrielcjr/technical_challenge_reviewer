@@ -3,7 +3,7 @@ from typing import Literal
 
 
 # Constants for clean code - intention revealing
-SENTINEL_TEST_TOKENS = ("", "gsk_test", "xai_test", "test")
+SENTINEL_TEST_TOKENS = ("", "gsk_test", "test")
 DEFAULT_CALLBACK_URL = "http://nginx/api/internal/evaluation-result"
 DEFAULT_CLONE_BASE_DIR = "/tmp/challenge_clones"
 DEFAULT_MAX_CONTENT_CHARS = 25_000
@@ -18,12 +18,11 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
     )
 
-    # LLM Keys - support multiple env names via properties
-    grok_api_key: str = ""
-    xai_api_key: str = ""
+    # LLM Keys - Groq (primary, free) and Gemini (fallback, free quota)
+    groq_api_key: str = ""
     gemini_api_key: str = ""
 
-    llm_provider: Literal["auto", "grok", "gemini"] = "auto"
+    llm_provider: Literal["auto", "groq", "gemini"] = "auto"
     symfony_callback_url: str = DEFAULT_CALLBACK_URL
     callback_token: str = "s3cr3t_shared_token_change_me"
     clone_base_dir: str = DEFAULT_CLONE_BASE_DIR
@@ -34,14 +33,14 @@ class Settings(BaseSettings):
     clone_timeout_seconds: int = DEFAULT_CLONE_TIMEOUT_SECONDS
 
     @property
-    def resolved_grok_api_key(self) -> str:
-        """Resolve Grok key supporting both GROK_API_KEY and XAI_API_KEY."""
-        return self.grok_api_key or self.xai_api_key or ""
+    def resolved_groq_api_key(self) -> str:
+        """Resolve Groq key."""
+        return self.groq_api_key or ""
 
-    def is_grok_configured(self) -> bool:
+    def is_groq_configured(self) -> bool:
         return bool(
-            self.resolved_grok_api_key
-            and self.resolved_grok_api_key not in SENTINEL_TEST_TOKENS
+            self.resolved_groq_api_key
+            and self.resolved_groq_api_key not in SENTINEL_TEST_TOKENS
         )
 
     def is_gemini_configured(self) -> bool:

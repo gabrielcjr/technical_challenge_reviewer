@@ -5,7 +5,7 @@ from app.evaluator import evaluate_repository
 def test_evaluate_repository_no_keys(monkeypatch):
     # Mock no LLM keys -> fallback path
     import app.config as config_module
-    monkeypatch.setattr(config_module.settings, "grok_api_key", "gsk_test")
+    monkeypatch.setattr(config_module.settings, "groq_api_key", "gsk_test")
     monkeypatch.setattr(config_module.settings, "gemini_api_key", "test")
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -25,7 +25,7 @@ def test_evaluate_repository_no_keys(monkeypatch):
 
 def test_evaluate_repository_empty_repo(monkeypatch):
     import app.config as config_module
-    monkeypatch.setattr(config_module.settings, "grok_api_key", "gsk_test")
+    monkeypatch.setattr(config_module.settings, "groq_api_key", "gsk_test")
     monkeypatch.setattr(config_module.settings, "gemini_api_key", "test")
 
     with tempfile.TemporaryDirectory() as tmpdir:

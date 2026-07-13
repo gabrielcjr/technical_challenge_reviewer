@@ -43,6 +43,7 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "python-evaluator"
     llm_provider: str
-    grok_configured: bool
+    groq_configured: bool
     gemini_configured: bool
-    xai_configured: bool = False  # backward compat alias
+
+    model_config = {"extra": "allow"}

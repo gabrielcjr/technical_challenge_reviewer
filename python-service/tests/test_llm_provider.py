@@ -42,7 +42,7 @@ def test_normalize_result_bool_string():
 def test_evaluate_with_no_keys(monkeypatch):
     # Simulate no keys configured -> fallback
     import app.config as config_module
-    monkeypatch.setattr(config_module.settings, "grok_api_key", "gsk_test")
+    monkeypatch.setattr(config_module.settings, "groq_api_key", "gsk_test")
     monkeypatch.setattr(config_module.settings, "gemini_api_key", "test")
     monkeypatch.setattr(config_module.settings, "llm_provider", "auto")
 

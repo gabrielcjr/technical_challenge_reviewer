@@ -64,7 +64,7 @@ services:
     env_file:
       - .env
     environment:
-      GROK_API_KEY: ${GROK_API_KEY}
+      GROQ_API_KEY: ${GROQ_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       LLM_PROVIDER: ${LLM_PROVIDER:-auto}
       SYMFONY_CALLBACK_URL: ${SYMFONY_INTERNAL_CALLBACK_URL:-http://nginx/api/internal/evaluation-result}
