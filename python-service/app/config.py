@@ -9,6 +9,8 @@ DEFAULT_CLONE_BASE_DIR = "/tmp/challenge_clones"
 DEFAULT_MAX_CONTENT_CHARS = 25_000
 DEFAULT_MAX_FILES = 100
 DEFAULT_CLONE_TIMEOUT_SECONDS = 60
+DEFAULT_FAILED_CALLBACKS_PATH = "/tmp/failed_callbacks.jsonl"
+DEFAULT_CALLBACK_REPLAY_INTERVAL_SECONDS = 60
 
 
 class Settings(BaseSettings):
@@ -31,6 +33,10 @@ class Settings(BaseSettings):
     max_file_content_chars: int = DEFAULT_MAX_CONTENT_CHARS
     max_files_to_read: int = DEFAULT_MAX_FILES
     clone_timeout_seconds: int = DEFAULT_CLONE_TIMEOUT_SECONDS
+
+    # Callback DLQ replay
+    failed_callbacks_path: str = DEFAULT_FAILED_CALLBACKS_PATH
+    callback_replay_interval_seconds: int = DEFAULT_CALLBACK_REPLAY_INTERVAL_SECONDS
 
     @property
     def resolved_groq_api_key(self) -> str:
