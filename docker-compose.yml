@@ -1,0 +1,105 @@
+services:
+  database:
+    image: postgres:17-alpine
+    container_name: challenge_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  php:
+    build:
+      context: ./symfony
+      dockerfile: Dockerfile
+    container_name: challenge_php
+    restart: unless-stopped
+    volumes:
+      - ./symfony:/var/www/symfony
+    depends_on:
+      database:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://app:app@database:5432/challenge_reviewer?serverVersion=17&charset=utf8
+    networks:
+      - app-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: challenge_nginx
+    restart: unless-stopped
+    ports:
+      - "${SYMFONY_PORT:-8080}:80"
+    volumes:
+      - ./symfony:/var/www/symfony
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - php
+    networks:
+      - app-network
+
+  python-evaluator:
+    build:
+      context: ./python-service
+      dockerfile: Dockerfile
+    container_name: challenge_python
+    restart: unless-stopped
+    ports:
+      - "${EVALUATOR_PORT:-8001}:8000"
+    volumes:
+      - ./python-service/app:/app/app
+    env_file:
+      - .env
+    environment:
+      GROK_API_KEY: ${GROK_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      LLM_PROVIDER: ${LLM_PROVIDER:-auto}
+      SYMFONY_CALLBACK_URL: ${SYMFONY_INTERNAL_CALLBACK_URL:-http://nginx/api/internal/evaluation-result}
+      CALLBACK_TOKEN: ${CALLBACK_TOKEN}
+      PYTHONUNBUFFERED: 1
+    depends_on:
+      - nginx
+    networks:
+      - app-network
+
+  php-worker:
+    build:
+      context: ./symfony
+      dockerfile: Dockerfile
+    container_name: challenge_worker
+    restart: unless-stopped
+    volumes:
+      - ./symfony:/var/www/symfony
+    depends_on:
+      database:
+        condition: service_healthy
+      php:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://app:app@database:5432/challenge_reviewer?serverVersion=17&charset=utf8
+      MESSENGER_TRANSPORT_DSN: ${MESSENGER_TRANSPORT_DSN}
+    command: ["sh", "-c", "sleep 5 && php bin/console messenger:consume async --time-limit=3600 --sleep=1 -vv"]
+    networks:
+      - app-network
+
+volumes:
+  pgdata:
+
+networks:
+  app-network:
+    driver: bridge
