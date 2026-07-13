@@ -1,0 +1,15 @@
+# see https://symfony.com/doc/current/reference/configuration/framework.html
+framework:
+    secret: '%env(APP_SECRET)%'
+    session: true
+
+when@test:
+    framework:
+        test: true
+        validation:
+            not_compromised_password: false
+
+when@dev:
+    framework:
+        validation:
+            not_compromised_password: false
