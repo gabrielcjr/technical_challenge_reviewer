@@ -2,8 +2,10 @@
 
 namespace App\Controller;
 
-use App\Enum\SubmissionStatus;
+use App\Dto\EvaluationCallbackPayload;
 use App\Repository\SubmissionRepository;
+use App\Service\CallbackAuthenticator;
+use App\Service\CallbackAuthenticationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -13,110 +15,90 @@ use Symfony\Component\Routing\Attribute\Route;
 
 class InternalCallbackController extends AbstractController
 {
+    public function __construct(
+        private readonly SubmissionRepository $submissionRepository,
+        private readonly EntityManagerInterface $entityManager,
+        private readonly LoggerInterface $logger,
+        private readonly string $callbackToken,
+    ) {
+    }
+
     #[Route('/api/internal/evaluation-result', name: 'internal_evaluation_result', methods: ['POST'])]
-    public function evaluationResult(
-        Request $request,
-        SubmissionRepository $submissionRepo,
-        EntityManagerInterface $em,
-        LoggerInterface $logger,
-    ): JsonResponse {
-        $expectedToken = $this->getParameter('callback_token');
+    public function evaluationResult(Request $request): JsonResponse
+    {
+        try {
+            $payload = $this->parsePayload($request);
+            $authenticator = new CallbackAuthenticator($this->callbackToken, $this->logger);
+            $providedToken = $authenticator->extractToken($request, $payload);
+            $authenticator->authenticate($providedToken);
 
-        $providedToken = $request->headers->get('X-Internal-Token') ?? $request->headers->get('X-Callback-Token') ?? ($request->toArray(false)['callbackToken'] ?? null);
-
-        // Also check JSON body token
-        $payload = [];
-        $content = $request->getContent();
-        if ($content) {
-            $decoded = json_decode($content, true);
-            if (is_array($decoded)) {
-                $payload = $decoded;
-                // Token could be in body as callbackToken
-                if (!$providedToken && isset($decoded['callbackToken'])) {
-                    $providedToken = $decoded['callbackToken'];
-                }
-                // Or token field might be inside? Use providedToken from body if header missing
-                if (isset($decoded['token'])) {
-                    $providedToken = $decoded['token'];
-                }
-            }
+            $callbackData = EvaluationCallbackPayload::fromArray($payload);
+            return $this->processEvaluation($callbackData);
+        } catch (CallbackAuthenticationException $authException) {
+            return $this->json(['error' => $authException->getMessage()], 401);
+        } catch (\InvalidArgumentException $validationException) {
+            return $this->json(['error' => $validationException->getMessage()], 400);
+        } catch (\Exception $unexpectedException) {
+            $this->logger->error('Unexpected error in callback', ['error' => $unexpectedException->getMessage()]);
+            return $this->json(['error' => 'Internal error'], 500);
         }
-
-        // Fallback to query param for simplicity in dev?
-        if (!$providedToken) {
-            $providedToken = $request->query->get('token') ?? $request->headers->get('Authorization');
-            if ($providedToken && str_starts_with($providedToken, 'Bearer ')) {
-                $providedToken = substr($providedToken, 7);
-            }
-        }
-
-        // Token check - if expectedToken is set, enforce it
-        if ($expectedToken && $expectedToken !== 'change_me' && $providedToken !== $expectedToken) {
-            // For dev, allow if token is same as in body callbackToken? Already checked. Log warning but enforce?
-            // Let's be lenient if token is empty in dev? No, enforce if expected is set and provided differs.
-            // However, if providedToken is null, we check if request comes from internal docker network - allow in dev for easier testing
-            if ($providedToken !== $expectedToken) {
-                $logger->warning('Invalid callback token', [
-                    'expected' => substr($expectedToken, 0, 5) . '...',
-                    'provided' => $providedToken ? substr($providedToken, 0, 5) . '...' : 'null',
-                ]);
-                // In production you would return 401. For this challenge, we return 401
-                return $this->json(['error' => 'Invalid token'], 401);
-            }
-        }
-
-        $submissionId = $payload['submissionId'] ?? null;
-        $approved = $payload['approved'] ?? null;
-        $summary = $payload['summary'] ?? null;
-        $improvements = $payload['improvements'] ?? [];
-        $details = $payload['details'] ?? null;
-        $rawOutput = $payload['rawOutput'] ?? $payload['raw'] ?? null;
-        $reasoning = $payload['reasoning'] ?? null;
-
-        if (!$submissionId) {
-            return $this->json(['error' => 'submissionId required'], 400);
-        }
-
-        if ($approved === null) {
-            return $this->json(['error' => 'approved field required'], 400);
-        }
-
-        $submission = $submissionRepo->find($submissionId);
-        if (!$submission) {
-            $logger->error('Submission not found for callback', ['id' => $submissionId]);
-            return $this->json(['error' => 'Submission not found'], 404);
-        }
-
-        // Build evaluation result
-        $evaluationResult = [
-            'approved' => (bool) $approved,
-            'summary' => $summary ?? ($approved ? 'Challenge approved' : 'Challenge not approved'),
-            'improvements' => $improvements,
-            'reasoning' => $reasoning ?? $rawOutput ?? $details ?? '',
-            'raw' => $rawOutput ?? json_encode($payload),
-            'evaluatedAt' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
-        ];
-
-        $submission->setEvaluationResult($evaluationResult);
-        $submission->setApproved((bool) $approved);
-        $submission->setStatus($approved ? SubmissionStatus::APPROVED : SubmissionStatus::REJECTED);
-        $submission->setProcessingLogs(
-            ($submission->getProcessingLogs() ?? '') . "\n" . 'Evaluated at ' . (new \DateTimeImmutable())->format('c') . ' - approved: ' . ($approved ? 'yes' : 'no')
-        );
-
-        $em->flush();
-
-        $logger->info('Submission evaluated', [
-            'id' => $submissionId,
-            'approved' => $approved,
-        ]);
-
-        return $this->json(['status' => 'ok', 'id' => $submissionId, 'approved' => $approved]);
     }
 
     #[Route('/api/internal/health', name: 'internal_health', methods: ['GET'])]
     public function health(): JsonResponse
     {
         return $this->json(['status' => 'ok', 'service' => 'symfony']);
+    }
+
+    private function parsePayload(Request $request): array
+    {
+        $content = $request->getContent();
+        if ($content === '') {
+            return [];
+        }
+
+        try {
+            $data = $request->toArray(false);
+            return is_array($data) ? $data : [];
+        } catch (\Exception) {
+            $decoded = json_decode($content, true);
+            return is_array($decoded) ? $decoded : [];
+        }
+    }
+
+    private function processEvaluation(EvaluationCallbackPayload $callbackData): JsonResponse
+    {
+        $submission = $this->submissionRepository->find($callbackData->submissionId);
+        if (!$submission) {
+            $this->logger->error('Submission not found for callback', ['id' => $callbackData->submissionId]);
+            return $this->json(['error' => 'Submission not found'], 404);
+        }
+
+        $evaluationResult = $this->buildEvaluationResult($callbackData);
+        $submission->applyEvaluationResult($evaluationResult, $callbackData->approved);
+        $this->entityManager->flush();
+
+        $this->logger->info('Submission evaluated', [
+            'id' => $callbackData->submissionId,
+            'approved' => $callbackData->approved,
+        ]);
+
+        return $this->json([
+            'status' => 'ok',
+            'id' => $callbackData->submissionId,
+            'approved' => $callbackData->approved,
+        ]);
+    }
+
+    private function buildEvaluationResult(EvaluationCallbackPayload $data): array
+    {
+        return [
+            'approved' => $data->approved,
+            'summary' => $data->summary,
+            'improvements' => $data->improvements,
+            'reasoning' => $data->reasoning,
+            'raw' => $data->rawOutput ?? '',
+            'evaluatedAt' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
+        ];
     }
 }

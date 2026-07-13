@@ -14,53 +14,46 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 class ChallengeController extends AbstractController
 {
+    public function __construct(
+        private readonly ChallengeRepository $challengeRepository,
+        private readonly EntityManagerInterface $entityManager,
+        private readonly ValidatorInterface $validator,
+    ) {
+    }
+
     #[Route('/api/challenges', name: 'api_challenge_list', methods: ['GET'])]
-    public function list(ChallengeRepository $repo): JsonResponse
+    public function apiList(): JsonResponse
     {
-        $challenges = $repo->findBy([], ['createdAt' => 'DESC']);
-        $data = array_map(fn(Challenge $c) => [
-            'id' => $c->getId()->toRfc4122(),
-            'title' => $c->getTitle(),
-            'description' => $c->getDescription(),
-            'createdAt' => $c->getCreatedAt()->format(\DateTimeInterface::ATOM),
-        ], $challenges);
+        $challenges = $this->challengeRepository->findBy([], ['createdAt' => 'DESC']);
+        $data = array_map(fn(Challenge $c) => $this->serializeChallenge($c), $challenges);
 
         return $this->json($data);
     }
 
     #[Route('/api/challenges', name: 'api_challenge_create', methods: ['POST'])]
-    public function create(Request $request, EntityManagerInterface $em, ValidatorInterface $validator): JsonResponse
+    public function apiCreate(Request $request): JsonResponse
     {
-        $data = json_decode($request->getContent(), true);
-        if (!$data) {
-            $data = $request->request->all();
-        }
+        $requestData = $this->parseRequestBody($request);
 
-        $title = $data['title'] ?? null;
-        $description = $data['description'] ?? null;
+        $title = $requestData['title'] ?? null;
+        $description = $requestData['description'] ?? null;
 
-        if (!$title || !$description) {
+        if (!$this->hasRequiredFields($title, $description)) {
             return $this->json(['error' => 'title and description required'], 400);
         }
 
-        $challenge = new Challenge();
-        $challenge->setTitle($title);
-        $challenge->setDescription($description);
+        $challenge = $this->createChallenge($title, $description);
 
-        $errors = $validator->validate($challenge);
-        if (count($errors) > 0) {
-            $errs = [];
-            foreach ($errors as $e) {
-                $errs[$e->getPropertyPath()] = $e->getMessage();
-            }
-            return $this->json(['errors' => $errs], 400);
+        $validationResponse = $this->validateChallenge($challenge);
+        if ($validationResponse !== null) {
+            return $validationResponse;
         }
 
-        $em->persist($challenge);
-        $em->flush();
+        $this->entityManager->persist($challenge);
+        $this->entityManager->flush();
 
         return $this->json([
-            'id' => $challenge->getId()->toRfc4122(),
+            'id' => $challenge->getIdAsString(),
             'title' => $challenge->getTitle(),
         ], 201);
     }
@@ -72,16 +65,19 @@ class ChallengeController extends AbstractController
     }
 
     #[Route('/challenges', name: 'challenge_create_form', methods: ['POST'])]
-    public function createChallengeForm(Request $request, EntityManagerInterface $em, ValidatorInterface $validator): Response
+    public function createFromForm(Request $request): Response
     {
         $title = $request->request->get('title');
         $description = $request->request->get('description');
 
-        $challenge = new Challenge();
-        $challenge->setTitle($title);
-        $challenge->setDescription($description);
+        if (!is_string($title) || !is_string($description)) {
+            $this->addFlash('error', 'Title and description are required');
+            return $this->redirectToRoute('challenge_new_form');
+        }
 
-        $errors = $validator->validate($challenge);
+        $challenge = $this->createChallenge($title, $description);
+
+        $errors = $this->validator->validate($challenge);
         if (count($errors) > 0) {
             foreach ($errors as $error) {
                 $this->addFlash('error', $error->getPropertyPath() . ': ' . $error->getMessage());
@@ -89,10 +85,69 @@ class ChallengeController extends AbstractController
             return $this->redirectToRoute('challenge_new_form');
         }
 
-        $em->persist($challenge);
-        $em->flush();
+        $this->entityManager->persist($challenge);
+        $this->entityManager->flush();
 
         $this->addFlash('success', 'Challenge created!');
         return $this->redirectToRoute('home');
+    }
+
+    private function serializeChallenge(Challenge $challenge): array
+    {
+        return [
+            'id' => $challenge->getIdAsString(),
+            'title' => $challenge->getTitle(),
+            'description' => $challenge->getDescription(),
+            'createdAt' => $challenge->getCreatedAt()->format(\DateTimeInterface::ATOM),
+        ];
+    }
+
+    private function parseRequestBody(Request $request): array
+    {
+        $content = $request->getContent();
+        if ($content === '') {
+            return $request->request->all();
+        }
+
+        try {
+            $decoded = $request->toArray();
+            return is_array($decoded) ? $decoded : [];
+        } catch (\Exception) {
+            // Fallback to json_decode for empty or invalid JSON
+            $decoded = json_decode($content, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+            return $request->request->all();
+        }
+    }
+
+    private function hasRequiredFields(?string $title, ?string $description): bool
+    {
+        return !empty($title) && !empty($description);
+    }
+
+    private function createChallenge(string $title, string $description): Challenge
+    {
+        $challenge = new Challenge();
+        $challenge->setTitle($title);
+        $challenge->setDescription($description);
+
+        return $challenge;
+    }
+
+    private function validateChallenge(Challenge $challenge): ?JsonResponse
+    {
+        $errors = $this->validator->validate($challenge);
+        if (count($errors) === 0) {
+            return null;
+        }
+
+        $errorMap = [];
+        foreach ($errors as $error) {
+            $errorMap[$error->getPropertyPath()] = $error->getMessage();
+        }
+
+        return $this->json(['errors' => $errorMap], 400);
     }
 }
