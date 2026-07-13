@@ -5,11 +5,16 @@ on:
     branches:
       - master
       - main
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
+    # Runs when:
+    # - opened: PR is created against master/main
+    # - synchronize: new push to the PR branch (each commit)
+    # - reopened, ready_for_review, etc.
+  push:
+    branches-ignore:
+      - master
+      - main
+    # Ensures CI also runs on every push to a feature branch,
+    # even before PR is marked ready, covering pushes against opened PRs
 
 # Cancel previous runs if new commit pushed to same PR
 concurrency:
