@@ -16,6 +16,24 @@ class ChallengeRepository extends ServiceEntityRepository
         parent::__construct($registry, Challenge::class);
     }
 
+    public function persist(Challenge $entity): void
+    {
+        $this->getEntityManager()->persist($entity);
+    }
+
+    public function saveAndFlush(Challenge $entity): void
+    {
+        $this->persist($entity);
+        $this->getEntityManager()->flush();
+    }
+
+    public function removeAndFlush(Challenge $entity): void
+    {
+        $this->getEntityManager()->remove($entity);
+        $this->getEntityManager()->flush();
+    }
+
+    // Backward compatible aliases - delegating to clean methods
     public function save(Challenge $entity, bool $flush = false): void
     {
         $this->getEntityManager()->persist($entity);

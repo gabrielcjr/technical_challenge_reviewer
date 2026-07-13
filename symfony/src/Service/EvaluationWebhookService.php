@@ -6,52 +6,95 @@ use App\Entity\Submission;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
+final class EvaluationDispatchException extends \RuntimeException
+{
+}
+
 class EvaluationWebhookService
 {
+    private const TIMEOUT_SECONDS = 10;
+    private const HTTP_SUCCESS_MIN = 200;
+    private const HTTP_SUCCESS_MAX = 299;
+
+    private readonly EvaluationConfig $config;
+
+    /**
+     * Supports both new clean signature (config object) and legacy (3 strings) for backward compat.
+     *
+     * @param EvaluationConfig|string $configOrEvaluatorUrl
+     */
     public function __construct(
         private readonly HttpClientInterface $httpClient,
         private readonly LoggerInterface $logger,
-        private readonly string $evaluatorUrl,
-        private readonly string $callbackUrl,
-        private readonly string $callbackToken,
+        EvaluationConfig|string $configOrEvaluatorUrl,
+        string $callbackUrl = '',
+        string $callbackToken = '',
     ) {
+        if ($configOrEvaluatorUrl instanceof EvaluationConfig) {
+            $this->config = $configOrEvaluatorUrl;
+        } else {
+            // Legacy: 3 strings provided
+            $this->config = new EvaluationConfig(
+                $configOrEvaluatorUrl,
+                $callbackUrl,
+                $callbackToken
+            );
+        }
     }
 
-    /**
-     * Sends submission data to Python evaluator via webhook.
-     *
-     * @throws \Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface
-     */
     public function dispatch(Submission $submission): void
     {
-        $payload = [
-            'submissionId' => $submission->getId()->toRfc4122(),
+        $payload = $this->buildPayload($submission);
+        $this->logDispatching($payload['submissionId']);
+        $response = $this->sendEvaluationRequest($payload);
+        $this->ensureSuccessfulResponse($response, $payload['submissionId']);
+    }
+
+    private function buildPayload(Submission $submission): array
+    {
+        return [
+            'submissionId' => $submission->getIdAsString(),
             'githubRepoUrl' => $submission->getGithubRepoUrl(),
             'challengeText' => $submission->getChallengeSnapshot(),
-            'callbackUrl' => $this->callbackUrl,
-            'callbackToken' => $this->callbackToken,
+            'callbackUrl' => $this->config->callbackUrl,
+            'callbackToken' => $this->config->callbackToken,
         ];
+    }
 
+    private function logDispatching(string $submissionId): void
+    {
         $this->logger->info('Dispatching evaluation webhook', [
-            'submissionId' => $payload['submissionId'],
-            'evaluatorUrl' => $this->evaluatorUrl,
+            'submissionId' => $submissionId,
+            'evaluatorUrl' => $this->config->evaluatorUrl,
         ]);
+    }
 
-        $response = $this->httpClient->request('POST', rtrim($this->evaluatorUrl, '/') . '/evaluate', [
+    private function sendEvaluationRequest(array $payload)
+    {
+        return $this->httpClient->request('POST', $this->config->getEvaluatorEndpoint(), [
             'json' => $payload,
-            'timeout' => 10,
+            'timeout' => self::TIMEOUT_SECONDS,
         ]);
+    }
 
-        // Trigger request but don't necessarily wait long - we expect 202
+    private function ensureSuccessfulResponse($response, string $submissionId): void
+    {
         $statusCode = $response->getStatusCode();
 
         $this->logger->info('Evaluation webhook sent', [
-            'submissionId' => $payload['submissionId'],
+            'submissionId' => $submissionId,
             'statusCode' => $statusCode,
         ]);
 
-        if ($statusCode < 200 || $statusCode >= 300) {
-            throw new \RuntimeException(sprintf('Evaluator responded with status %d', $statusCode));
+        if (!$this->isSuccessStatus($statusCode)) {
+            throw new EvaluationDispatchException(
+                sprintf('Evaluator responded with status %d', $statusCode)
+            );
         }
+    }
+
+    private function isSuccessStatus(int $statusCode): bool
+    {
+        return $statusCode >= self::HTTP_SUCCESS_MIN && $statusCode <= self::HTTP_SUCCESS_MAX;
     }
 }

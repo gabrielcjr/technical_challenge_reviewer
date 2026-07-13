@@ -23,11 +23,20 @@ services:
             - '../src/Entity/'
             - '../src/Kernel.php'
             - '../src/Enum/'
+            - '../src/Dto/'
 
-    App\Service\EvaluationWebhookService:
+    App\Service\EvaluationConfig:
         arguments:
             $evaluatorUrl: '%evaluator_url%'
             $callbackUrl: '%callback_url%'
+            $callbackToken: '%callback_token%'
+
+    App\Service\EvaluationWebhookService:
+        arguments:
+            $configOrEvaluatorUrl: '@App\Service\EvaluationConfig'
+
+    App\Controller\InternalCallbackController:
+        arguments:
             $callbackToken: '%callback_token%'
 
     # add more service definitions when explicit configuration is needed
