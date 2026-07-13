@@ -1,4 +1,7 @@
 import logging
+import json
+import pathlib
+from dataclasses import dataclass
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log, retry_if_exception_type
 
@@ -7,12 +10,47 @@ from .models import CallbackPayload
 
 logger = logging.getLogger(__name__)
 
+# Constants - intention revealing names
+CALLBACK_RETRY_ATTEMPTS = 5
+CALLBACK_RETRY_MIN_WAIT = 2
+CALLBACK_RETRY_MAX_WAIT = 30
+CALLBACK_RETRY_MULTIPLIER = 1
+HTTP_TIMEOUT_SECONDS = 15.0
+SERVER_ERROR_THRESHOLD = 500
+FAILED_CALLBACKS_LOG_PATH = "/tmp/failed_callbacks.jsonl"
+RESPONSE_PREVIEW_LENGTH = 200
+
+
+@dataclass(frozen=True)
+class EvaluationCallback:
+    """Value object representing callback data - replaces 8-arg function."""
+
+    submission_id: str
+    approved: bool
+    summary: str
+    improvements: list
+    reasoning: str | None = None
+    raw_output: str | None = None
+
+    def to_payload(self, token: str) -> dict:
+        payload = CallbackPayload(
+            submissionId=self.submission_id,
+            approved=self.approved,
+            summary=self.summary,
+            improvements=self.improvements,
+            reasoning=self.reasoning,
+            rawOutput=self.raw_output,
+            callbackToken=token,
+        )
+        return payload.to_symfony_dict()
+
+
 @retry(
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1, min=2, max=30),
+    stop=stop_after_attempt(CALLBACK_RETRY_ATTEMPTS),
+    wait=wait_exponential(multiplier=CALLBACK_RETRY_MULTIPLIER, min=CALLBACK_RETRY_MIN_WAIT, max=CALLBACK_RETRY_MAX_WAIT),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
-    reraise=True
+    reraise=True,
 )
 def _post_with_retry(url: str, payload: dict, token: str) -> httpx.Response:
     headers = {
@@ -22,13 +60,39 @@ def _post_with_retry(url: str, payload: dict, token: str) -> httpx.Response:
 
     logger.info(f"Posting callback to {url} with payload submissionId={payload.get('submissionId')}")
 
-    with httpx.Client(timeout=15.0) as client:
+    with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as client:
         response = client.post(url, json=payload, headers=headers)
-        # Raise for status to trigger retry on 5xx
-        if response.status_code >= 500:
-            raise httpx.HTTPStatusError(f"Server error {response.status_code}", request=response.request, response=response)
+        _raise_for_server_errors(response)
         response.raise_for_status()
         return response
+
+
+def _raise_for_server_errors(response: httpx.Response) -> None:
+    if response.status_code >= SERVER_ERROR_THRESHOLD:
+        raise httpx.HTTPStatusError(
+            f"Server error {response.status_code}", request=response.request, response=response
+        )
+
+
+def _resolve_callback_url(provided_url: str) -> str:
+    return provided_url or settings.symfony_callback_url
+
+
+def _resolve_callback_token(provided_token: str) -> str:
+    return provided_token or settings.callback_token
+
+
+def _log_failed_callback(url: str, payload: dict, error: Exception) -> None:
+    try:
+        log_file = pathlib.Path(FAILED_CALLBACKS_LOG_PATH)
+        with log_file.open("a") as file_handle:
+            file_handle.write(
+                json.dumps({"url": url, "payload": payload, "error": str(error)}) + "\n"
+            )
+        logger.info(f"Logged failed callback to {log_file}")
+    except Exception as log_error:
+        logger.error(f"Failed to log failed callback: {log_error}")
+
 
 def send_callback(
     callback_url: str,
@@ -37,48 +101,41 @@ def send_callback(
     approved: bool,
     summary: str,
     improvements: list,
-    reasoning: str = None,
-    raw_output: str = None,
+    reasoning: str | None = None,
+    raw_output: str | None = None,
+) -> bool:
+    """
+    Backward compatible wrapper - delegates to send_evaluation_callback.
+    """
+    evaluation_callback = EvaluationCallback(
+        submission_id=submission_id,
+        approved=approved,
+        summary=summary,
+        improvements=improvements,
+        reasoning=reasoning,
+        raw_output=raw_output,
+    )
+    return send_evaluation_callback(callback_url, callback_token, evaluation_callback)
+
+
+def send_evaluation_callback(
+    callback_url: str,
+    callback_token: str,
+    evaluation_callback: EvaluationCallback,
 ) -> bool:
     """
     Send evaluation result back to Symfony with retry logic.
     Returns True on success, False on failure after retries.
     """
-    payload = {
-        "submissionId": submission_id,
-        "approved": approved,
-        "summary": summary,
-        "improvements": improvements,
-        "reasoning": reasoning,
-        "rawOutput": raw_output,
-        "callbackToken": callback_token,
-    }
-
-    # Use token from settings if callback_token is empty? Use provided
-    token = callback_token or settings.callback_token
-
-    # If callback_url is empty, use default from settings
-    url = callback_url or settings.symfony_callback_url
-
-    # Ensure URL uses internal docker network host if needed
-    # If url contains localhost, replace with nginx for docker?
-    # Keep as provided; in docker, Symfony app expects nginx host
+    resolved_url = _resolve_callback_url(callback_url)
+    resolved_token = _resolve_callback_token(callback_token)
+    payload = evaluation_callback.to_payload(resolved_token)
 
     try:
-        response = _post_with_retry(url, payload, token)
-        logger.info(f"Callback successful: {response.status_code} {response.text[:200]}")
+        response = _post_with_retry(resolved_url, payload, resolved_token)
+        logger.info(f"Callback successful: {response.status_code} {response.text[:RESPONSE_PREVIEW_LENGTH]}")
         return True
-    except Exception as e:
-        logger.error(f"Callback failed after retries: {e}")
-
-        # Log to file for manual replay
-        try:
-            import json, pathlib
-            log_file = pathlib.Path("/tmp/failed_callbacks.jsonl")
-            with log_file.open("a") as f:
-                f.write(json.dumps({"url": url, "payload": payload, "error": str(e)}) + "\n")
-            logger.info(f"Logged failed callback to {log_file}")
-        except Exception as log_e:
-            logger.error(f"Failed to log failed callback: {log_e}")
-
+    except Exception as callback_error:
+        logger.error(f"Callback failed after retries: {callback_error}")
+        _log_failed_callback(resolved_url, payload, callback_error)
         return False

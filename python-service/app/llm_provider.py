@@ -1,189 +1,255 @@
 import json
 import logging
 import re
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 
-from .config import settings
+from .config import settings, SENTINEL_TEST_TOKENS
 
 logger = logging.getLogger(__name__)
 
+# --- Constants ---
+GROK_MODEL_NAME = "grok-3-mini"
+GROK_API_BASE_URL = "https://api.x.ai/v1"
+GEMINI_MODEL_NAME = "gemini-1.5-flash"
+LLM_TEMPERATURE = 0.2
+LLM_MAX_TOKENS = 2000
+
+TRUTHY_STRINGS = ("true", "yes", "1", "approved")
+MAX_SUMMARY_LENGTH = 500
+MAX_IMPROVEMENT_LENGTH = 300
+MAX_REASONING_LENGTH = 2000
+MAX_IMPROVEMENTS_COUNT = 10
+
+JSON_FENCE_PATTERN = r"```(?:json)?\s*(\{.*?\})\s*```"
+LOG_PREVIEW_LENGTH = 500
+
+
+def _is_test_token(token: str) -> bool:
+    return token in SENTINEL_TEST_TOKENS
+
+
+def _is_grok_configured() -> bool:
+    return settings.is_grok_configured()
+
+
+def _is_gemini_configured() -> bool:
+    return settings.is_gemini_configured()
+
+
+# --- LLM Factory ---
 def get_grok_llm():
-    """Create Grok (xAI) LLM via LangChain"""
-    if not settings.grok_api_key or settings.grok_api_key in ("gsk_test", "xai_test", "test", ""):
+    """Create Grok (xAI) LLM via LangChain."""
+    if not _is_grok_configured():
         raise ValueError("Grok API key not configured")
 
     try:
         from langchain_xai import ChatXAI
-        # Free models from xAI:
-        # - grok-3-mini (recommended free, fast, cheap)
-        # - grok-3 (flagship, free tier with $5 credits)
-        # - grok-3-fast
-        # - grok-2-1212 (Grok 2)
-        # - grok-beta (legacy free)
-        llm = ChatXAI(
-            model="grok-3-mini",  # free tier model
-            api_key=settings.grok_api_key,
-            temperature=0.2,
-            max_tokens=2000,
+
+        return ChatXAI(
+            model=GROK_MODEL_NAME,
+            api_key=settings.resolved_grok_api_key,
+            temperature=LLM_TEMPERATURE,
+            max_tokens=LLM_MAX_TOKENS,
         )
-        return llm
-    except ImportError as e:
-        logger.error(f"langchain-xai not available: {e}. Trying fallback to openai-compatible client.")
-        # Fallback: try using ChatOpenAI with xAI base URL (xAI is OpenAI-compatible)
-        try:
-            from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(
-                model="grok-3-mini",
-                api_key=settings.grok_api_key,
-                base_url="https://api.x.ai/v1",
-                temperature=0.2,
-                max_tokens=2000,
-            )
-            return llm
-        except Exception as e2:
-            logger.error(f"Fallback also failed: {e2}")
-            raise e
+    except ImportError as import_error:
+        logger.warning(f"langchain-xai not available: {import_error}. Trying OpenAI-compatible fallback.")
+        return _create_grok_via_openai_compatible()
+
+
+def _create_grok_via_openai_compatible():
+    try:
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=GROK_MODEL_NAME,
+            api_key=settings.resolved_grok_api_key,
+            base_url=GROK_API_BASE_URL,
+            temperature=LLM_TEMPERATURE,
+            max_tokens=LLM_MAX_TOKENS,
+        )
+    except Exception as fallback_error:
+        logger.error(f"OpenAI-compatible fallback failed: {fallback_error}")
+        raise
+
 
 def get_gemini_llm():
-    """Create Gemini LLM via LangChain"""
-    if not settings.gemini_api_key or settings.gemini_api_key == "test":
+    """Create Gemini LLM via LangChain."""
+    if not _is_gemini_configured():
         raise ValueError("Gemini API key not configured")
 
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI
-        llm = ChatGoogleGenerativeAI(
+
+        return ChatGoogleGenerativeAI(
             google_api_key=settings.gemini_api_key,
-            model="gemini-1.5-flash",
-            temperature=0.2,
-            max_output_tokens=2000,
+            model=GEMINI_MODEL_NAME,
+            temperature=LLM_TEMPERATURE,
+            max_output_tokens=LLM_MAX_TOKENS,
         )
-        return llm
-    except ImportError as e:
-        logger.error(f"langchain-google-genai not available: {e}")
+    except ImportError as import_error:
+        logger.error(f"langchain-google-genai not available: {import_error}")
         raise
 
+
+# --- JSON Parsing ---
 def extract_json_from_text(text: str) -> Dict[str, Any]:
-    """Robustly extract JSON from LLM output that might have markdown fences or extra text"""
-    text = text.strip()
+    """Extract JSON from LLM output that may contain markdown fences or surrounding text."""
+    cleaned = text.strip()
+    cleaned = _strip_markdown_fence(cleaned)
 
-    # Remove markdown code fences if present
-    # ```json ... ```
-    match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
-    if match:
-        text = match.group(1)
-
-    # Try direct parse
     try:
-        return json.loads(text)
+        return json.loads(cleaned)
     except json.JSONDecodeError:
         pass
 
-    # Try to find first { to last } 
-    start = text.find('{')
-    end = text.rfind('}')
-    if start != -1 and end != -1 and end > start:
-        candidate = text[start:end+1]
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse candidate JSON: {e}, candidate: {candidate[:500]}")
-            pass
+    return _extract_json_between_braces(cleaned)
 
-    raise ValueError(f"Could not extract valid JSON from LLM output: {text[:1000]}")
 
+def _strip_markdown_fence(text: str) -> str:
+    match = re.search(JSON_FENCE_PATTERN, text, re.DOTALL)
+    if match:
+        return match.group(1)
+    return text
+
+
+def _extract_json_between_braces(text: str) -> Dict[str, Any]:
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError(f"Could not extract valid JSON from LLM output: {text[:1000]}")
+
+    candidate = text[start : end + 1]
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError as parse_error:
+        logger.warning(f"Failed to parse candidate JSON: {parse_error}, candidate preview: {candidate[:500]}")
+        raise ValueError(f"Could not extract valid JSON from LLM output: {text[:1000]}")
+
+
+# --- Normalization ---
 def normalize_evaluation_result(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensure result has required fields and correct types"""
-    approved = data.get('approved')
-    if isinstance(approved, str):
-        approved = approved.lower() in ('true', 'yes', '1', 'approved')
-    approved = bool(approved)
-
-    summary = data.get('summary', '')
-    if not summary:
-        summary = "Approved" if approved else "Not approved"
-
-    improvements = data.get('improvements', [])
-    if not isinstance(improvements, list):
-        improvements = [str(improvements)] if improvements else []
-
-    reasoning = data.get('reasoning', '') or data.get('reason', '') or data.get('explanation', '')
+    """Ensure result has required fields and correct types."""
+    approved = _normalize_approved_field(data.get("approved"))
+    summary = _normalize_summary(data, approved)
+    improvements = _normalize_improvements(data.get("improvements", []))
+    reasoning = _normalize_reasoning(data)
 
     return {
-        'approved': approved,
-        'summary': summary[:500],
-        'improvements': [str(i)[:300] for i in improvements][:10],
-        'reasoning': str(reasoning)[:2000],
-        'raw': data
+        "approved": approved,
+        "summary": summary,
+        "improvements": improvements,
+        "reasoning": reasoning,
+        "raw": data,
     }
 
+
+def _normalize_approved_field(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.lower() in TRUTHY_STRINGS
+    return bool(value)
+
+
+def _normalize_summary(data: Dict[str, Any], approved: bool) -> str:
+    summary = data.get("summary", "")
+    if not summary:
+        return "Approved" if approved else "Not approved"
+    return str(summary)[:MAX_SUMMARY_LENGTH]
+
+
+def _normalize_improvements(improvements: Any) -> List[str]:
+    if not isinstance(improvements, list):
+        improvements = [str(improvements)] if improvements else []
+    truncated = [str(item)[:MAX_IMPROVEMENT_LENGTH] for item in improvements]
+    return truncated[:MAX_IMPROVEMENTS_COUNT]
+
+
+def _normalize_reasoning(data: Dict[str, Any]) -> str:
+    reasoning = data.get("reasoning", "") or data.get("reason", "") or data.get("explanation", "")
+    return str(reasoning)[:MAX_REASONING_LENGTH]
+
+
+# --- Orchestration ---
 def evaluate_with_llm(prompt: str) -> Tuple[Dict[str, Any], str]:
     """
     Evaluate using LLM with fallback logic.
     Returns (normalized_result, provider_used)
     """
-    providers_to_try = []
+    providers = _determine_providers_to_try()
+    result = _try_providers_in_sequence(providers, prompt)
+    if result:
+        return result
+    return _handle_all_providers_failed()
 
-    # Normalize provider - support legacy grok spelling
-    provider_env = settings.llm_provider.lower() if settings.llm_provider else "auto"
+
+def _determine_providers_to_try() -> List[str]:
+    provider_env = (settings.llm_provider or "auto").lower()
     if provider_env == "grok":
-        provider_env = "grok"  # backward compat
+        return ["grok"]
+    if provider_env == "gemini":
+        return ["gemini"]
+    return ["grok", "gemini"]
 
-    if provider_env == "grok":
-        providers_to_try = ["grok"]
-    elif provider_env == "gemini":
-        providers_to_try = ["gemini"]
-    else:  # auto
-        # Try grok first, then gemini
-        providers_to_try = ["grok", "gemini"]
 
-    last_error = None
+def _try_providers_in_sequence(providers: List[str], prompt: str) -> Tuple[Dict[str, Any], str] | None:
+    last_error: Exception | None = None
 
-    for provider in providers_to_try:
+    for provider_name in providers:
         try:
-            if provider == "grok":
-                logger.info("Trying Grok (xAI) LLM")
-                if not settings.grok_api_key or settings.grok_api_key in ("gsk_test", "xai_test", "test", ""):
-                    raise ValueError("Grok API key not set")
-                llm = get_grok_llm()
-                used = "grok:grok-3-mini"
-            else:
-                logger.info("Trying Gemini LLM")
-                if not settings.gemini_api_key or settings.gemini_api_key in ("test", ""):
-                    raise ValueError("Gemini API key not set")
-                llm = get_gemini_llm()
-                used = "gemini:gemini-1.5-flash"
-
-            messages = [
-                ("system", "You are a senior technical reviewer. Output valid JSON only."),
-                ("human", prompt)
-            ]
-
-            response = llm.invoke(messages)
-            content = response.content if hasattr(response, 'content') else str(response)
-
-            logger.info(f"LLM response from {provider}: {content[:500]}")
-
-            parsed = extract_json_from_text(content)
-            normalized = normalize_evaluation_result(parsed)
-
-            return normalized, used
-
-        except Exception as e:
-            logger.warning(f"Provider {provider} failed: {e}")
-            last_error = e
+            return _evaluate_with_single_provider(provider_name, prompt)
+        except Exception as provider_error:
+            logger.warning(f"Provider {provider_name} failed: {provider_error}")
+            last_error = provider_error
             continue
 
-    # If all providers fail, return a fallback heuristic result
-    logger.error(f"All LLM providers failed, last error: {last_error}. Returning fallback REJECTED with improvements.")
+    # Store last_error for fallback logic
+    _try_providers_in_sequence.last_error = last_error  # type: ignore
+    return None
 
-    if settings.grok_api_key in ("gsk_test", "xai_test", "test", "") and settings.gemini_api_key in ("test", ""):
+
+def _evaluate_with_single_provider(provider: str, prompt: str) -> Tuple[Dict[str, Any], str]:
+    if provider == "grok":
+        llm = get_grok_llm()
+        used_provider_name = f"grok:{GROK_MODEL_NAME}"
+    else:
+        llm = get_gemini_llm()
+        used_provider_name = f"gemini:{GEMINI_MODEL_NAME}"
+
+    logger.info(f"Trying {provider} LLM")
+    messages = [
+        ("system", "You are a senior technical reviewer. Output valid JSON only."),
+        ("human", prompt),
+    ]
+
+    response = llm.invoke(messages)
+    content = response.content if hasattr(response, "content") else str(response)
+
+    logger.info(f"LLM response from {provider}: {content[:LOG_PREVIEW_LENGTH]}")
+
+    parsed = extract_json_from_text(content)
+    normalized = normalize_evaluation_result(parsed)
+
+    return normalized, used_provider_name
+
+
+def _handle_all_providers_failed() -> Tuple[Dict[str, Any], str]:
+    last_error = getattr(_try_providers_in_sequence, "last_error", None)
+    logger.error(f"All LLM providers failed, last error: {last_error}. Returning fallback.")
+
+    if not settings.is_grok_configured() and not settings.is_gemini_configured():
         logger.warning("No LLM keys configured, using heuristic fallback evaluation")
-        return {
-            'approved': False,
-            'summary': 'LLM keys not configured - evaluation skipped. Configure GROK_API_KEY or GEMINI_API_KEY for real AI evaluation.',
-            'improvements': ['Configure GROK_API_KEY (xAI) or GEMINI_API_KEY in .env to enable AI evaluation', 'Once keys are set, re-run evaluation via retry button'],
-            'reasoning': f'No LLM provider available. Last error: {last_error}. Set API keys to enable evaluation.',
-            'raw': {'error': str(last_error)}
-        }, 'fallback:no-keys'
+        return _build_no_keys_fallback_result(last_error)
 
     raise RuntimeError(f"All LLM providers failed. Last error: {last_error}")
+
+
+def _build_no_keys_fallback_result(last_error: Exception | None) -> Tuple[Dict[str, Any], str]:
+    return {
+        "approved": False,
+        "summary": "LLM keys not configured - evaluation skipped. Configure GROK_API_KEY or GEMINI_API_KEY for real AI evaluation.",
+        "improvements": [
+            "Configure GROK_API_KEY (xAI) or GEMINI_API_KEY in .env to enable AI evaluation",
+            "Once keys are set, re-run evaluation via retry button",
+        ],
+        "reasoning": f"No LLM provider available. Last error: {last_error}. Set API keys to enable evaluation.",
+        "raw": {"error": str(last_error)},
+    }, "fallback:no-keys"
