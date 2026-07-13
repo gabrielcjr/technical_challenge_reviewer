@@ -83,16 +83,25 @@ def _resolve_callback_token(provided_token: str) -> str:
 
 
 def _get_failed_path() -> pathlib.Path:
+    # Single source of truth: config, fallback to legacy constant only for safety
     try:
         return pathlib.Path(settings.failed_callbacks_path)
-    except Exception:
+    except AttributeError:
         return pathlib.Path(FAILED_CALLBACKS_LOG_PATH)
+
+
+def _ensure_parent_exists(path: pathlib.Path) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
 
 
 def _log_failed_callback(url: str, payload: dict, error: Exception) -> None:
     try:
         log_file = _get_failed_path()
-        with log_file.open("a") as file_handle:
+        _ensure_parent_exists(log_file)
+        with log_file.open("a", encoding="utf-8") as file_handle:
             file_handle.write(
                 json.dumps({"url": url, "payload": payload, "error": str(error)}) + "\n"
             )

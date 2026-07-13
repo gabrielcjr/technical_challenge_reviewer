@@ -1,104 +1,203 @@
+import asyncio
 import json
 import logging
 import pathlib
-import asyncio
-from typing import Tuple
+from dataclasses import dataclass
+from typing import List
 
 from .config import settings
-from .symfony_client import FAILED_CALLBACKS_LOG_PATH, _post_with_retry
+from .symfony_client import _post_with_retry
 
 logger = logging.getLogger(__name__)
 
-# Use config path so tests can override
-REPLAY_BATCH_SIZE = 100
+
+# --- Value Objects ---
 
 
-def _get_failed_path() -> pathlib.Path:
-    return pathlib.Path(getattr(settings, "failed_callbacks_path", FAILED_CALLBACKS_LOG_PATH))
+@dataclass(frozen=True)
+class FailedCallbackEntry:
+    url: str
+    payload: dict
+    error: str | None = None
+
+    @property
+    def submission_id(self) -> str:
+        return self.payload.get("submissionId", "unknown")
 
 
-def _safe_parse_line(line: str, line_no: int) -> dict | None:
-    line = line.strip()
-    if not line:
+@dataclass(frozen=True)
+class ReplayResult:
+    total: int
+    succeeded: int
+    still_failing: int
+
+    def __iter__(self):
+        # Backward compatible tuple unpacking: total, ok, remaining = result
+        return iter((self.total, self.succeeded, self.still_failing))
+
+    def to_dict(self) -> dict:
+        return {
+            "total": self.total,
+            "replayed": self.succeeded,
+            "still_failing": self.still_failing,
+        }
+
+
+# --- Path resolution - single source of truth from config ---
+
+
+def get_failed_path() -> pathlib.Path:
+    return pathlib.Path(settings.failed_callbacks_path)
+
+
+def get_failed_callbacks_count() -> int:
+    path = get_failed_path()
+    if not path.exists():
+        return 0
+    try:
+        return len([line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()])
+    except Exception as read_error:
+        logger.error(f"Failed to count DLQ file {path}: {read_error}")
+        return -1
+
+
+# --- Parsing ---
+
+
+def _safe_parse_line(line: str, line_no: int) -> FailedCallbackEntry | None:
+    stripped = line.strip()
+    if not stripped:
         return None
     try:
-        data = json.loads(line)
-        if not isinstance(data, dict) or "url" not in data or "payload" not in data:
-            logger.warning(f"Skipping malformed DLQ line {line_no}: missing url/payload")
-            return None
-        return data
-    except json.JSONDecodeError as e:
-        logger.warning(f"Skipping invalid JSON DLQ line {line_no}: {e}")
+        data = json.loads(stripped)
+    except json.JSONDecodeError as decode_error:
+        logger.warning(f"Skipping invalid JSON DLQ line {line_no}: {decode_error}")
         return None
 
+    if not isinstance(data, dict) or "url" not in data or "payload" not in data:
+        logger.warning(f"Skipping malformed DLQ line {line_no}: missing url/payload")
+        return None
 
-def replay_failed_callbacks() -> Tuple[int, int, int]:
-    """
-    Attempt to replay callbacks stored in failed_callbacks.jsonl.
-    Returns (total, succeeded, still_failed).
-    Atomic rewrite: write remaining failures to temp file then rename.
-    """
-    path = _get_failed_path()
-    if not path.exists() or path.stat().st_size == 0:
-        return (0, 0, 0)
+    return FailedCallbackEntry(
+        url=data.get("url", ""),
+        payload=data.get("payload", {}),
+        error=data.get("error"),
+    )
 
-    total = 0
-    succeeded = 0
-    remaining = []
 
+def _read_entries(path: pathlib.Path) -> List[FailedCallbackEntry]:
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except Exception as e:
-        logger.error(f"Failed to read DLQ file {path}: {e}")
-        return (0, 0, 0)
+        raw_lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception as read_error:
+        logger.error(f"Failed to read DLQ file {path}: {read_error}")
+        return []
 
-    for idx, raw in enumerate(lines, start=1):
+    entries: List[FailedCallbackEntry] = []
+    for idx, raw in enumerate(raw_lines, start=1):
         entry = _safe_parse_line(raw, idx)
-        if entry is None:
-            continue
-        total += 1
-        url = entry.get("url")
-        payload = entry.get("payload", {})
-        token = payload.get("callbackToken") or entry.get("token") or settings.callback_token
+        if entry is not None:
+            entries.append(entry)
+    return entries
 
-        try:
-            _post_with_retry(url, payload, token)
-            succeeded += 1
-            logger.info(f"DLQ replay succeeded for submissionId={payload.get('submissionId')} (line {idx})")
-        except Exception as replay_error:
-            logger.warning(f"DLQ replay still failing for {payload.get('submissionId')} line {idx}: {replay_error}")
-            remaining.append(entry)
 
-    # Atomic rewrite
+# --- Replay attempt - single responsibility ---
+
+
+def _resolve_token(entry: FailedCallbackEntry) -> str:
+    return (
+        entry.payload.get("callbackToken")
+        or entry.payload.get("token")
+        or settings.callback_token
+    )
+
+
+def _attempt_single_replay(entry: FailedCallbackEntry) -> bool:
+    token = _resolve_token(entry)
+    try:
+        _post_with_retry(entry.url, entry.payload, token)
+        logger.info(f"DLQ replay succeeded for submissionId={entry.submission_id}")
+        return True
+    except Exception as replay_error:
+        logger.warning(
+            f"DLQ replay still failing for {entry.submission_id}: {replay_error}"
+        )
+        return False
+
+
+# --- Atomic write ---
+
+
+def _write_remaining(path: pathlib.Path, remaining: List[FailedCallbackEntry]) -> None:
     try:
         if not remaining:
             path.unlink(missing_ok=True)
-            logger.info(f"DLQ replay complete: {succeeded}/{total} recovered, file cleared")
-        else:
-            tmp = path.with_suffix(".tmp")
-            with tmp.open("w", encoding="utf-8") as f:
-                for ent in remaining:
-                    f.write(json.dumps(ent) + "\n")
-            tmp.replace(path)
-            logger.info(f"DLQ replay: {succeeded}/{total} recovered, {len(remaining)} still failing")
-    except Exception as write_err:
-        logger.error(f"Failed to rewrite DLQ file {path}: {write_err}")
+            logger.info("DLQ file cleared after successful replay")
+            return
 
-    return (total, succeeded, len(remaining))
+        tmp_path = path.with_name(path.name + ".tmp")
+        with tmp_path.open("w", encoding="utf-8") as file_handle:
+            for entry in remaining:
+                file_handle.write(
+                    json.dumps(
+                        {
+                            "url": entry.url,
+                            "payload": entry.payload,
+                            "error": entry.error,
+                        }
+                    )
+                    + "\n"
+                )
+        tmp_path.replace(path)
+    except Exception as write_error:
+        logger.error(f"Failed to rewrite DLQ file {path}: {write_error}")
+
+
+# --- Public API - orchestrator with single level of abstraction ---
+
+
+def replay_failed_callbacks() -> ReplayResult:
+    path = get_failed_path()
+    if not path.exists() or path.stat().st_size == 0:
+        return ReplayResult(total=0, succeeded=0, still_failing=0)
+
+    entries = _read_entries(path)
+    if not entries:
+        # File contained only blank / malformed lines - clean it
+        _write_remaining(path, [])
+        return ReplayResult(total=0, succeeded=0, still_failing=0)
+
+    succeeded = 0
+    remaining: List[FailedCallbackEntry] = []
+
+    for entry in entries:
+        if _attempt_single_replay(entry):
+            succeeded += 1
+        else:
+            remaining.append(entry)
+
+    _write_remaining(path, remaining)
+
+    total = len(entries)
+    still_failing = len(remaining)
+    if succeeded == total:
+        logger.info(f"DLQ replay complete: {succeeded}/{total} recovered, file cleared")
+    else:
+        logger.info(
+            f"DLQ replay: {succeeded}/{total} recovered, {still_failing} still failing"
+        )
+
+    return ReplayResult(total=total, succeeded=succeeded, still_failing=still_failing)
 
 
 async def replay_loop(interval_seconds: int | None = None) -> None:
-    """Infinite async loop — runs every interval_seconds, never raises."""
-    interval = interval_seconds or getattr(settings, "callback_replay_interval_seconds", 60)
-    logger.info(f"Starting callback replay loop every {interval}s (path={_get_failed_path()})")
+    interval = interval_seconds or settings.callback_replay_interval_seconds
+    path = get_failed_path()
+    logger.info(
+        f"Starting callback replay loop every {interval}s (path={path})"
+    )
     while True:
         try:
             await asyncio.to_thread(replay_failed_callbacks)
-        except Exception as loop_err:
-            logger.exception(f"Unexpected error in replay loop: {loop_err}")
+        except Exception as loop_error:
+            logger.exception(f"Unexpected error in replay loop: {loop_error}")
         await asyncio.sleep(interval)
-
-
-def replay_once_sync() -> Tuple[int, int, int]:
-    """Sync helper for CLI / manual trigger."""
-    return replay_failed_callbacks()

@@ -10,7 +10,12 @@ from .models import EvaluateRequest, HealthResponse
 from .repo_cloner import cloned_repo, validate_github_url
 from .evaluator import evaluate_repository
 from .symfony_client import EvaluationCallback, send_evaluation_callback
-from .callback_replayer import replay_loop, replay_failed_callbacks
+from .callback_replayer import (
+    get_failed_path,
+    get_failed_callbacks_count,
+    replay_failed_callbacks,
+    replay_loop,
+)
 
 # --- Constants ---
 MIN_CHALLENGE_TEXT_LENGTH = 10
@@ -84,22 +89,19 @@ async def root():
 
 @app.get("/admin/replay-status")
 async def replay_status():
-    from .callback_replayer import _get_failed_path
-
-    path = _get_failed_path()
-    count = 0
-    if path.exists():
-        try:
-            count = len([l for l in path.read_text().splitlines() if l.strip()])
-        except Exception:
-            count = -1
-    return {"failed_callbacks": count, "path": str(path), "replay_interval": settings.callback_replay_interval_seconds}
+    count = await asyncio.to_thread(get_failed_callbacks_count)
+    path = get_failed_path()
+    return {
+        "failed_callbacks": count,
+        "path": str(path),
+        "replay_interval": settings.callback_replay_interval_seconds,
+    }
 
 
 @app.post("/admin/replay-failed-callbacks")
 async def replay_failed():
-    total, ok, remaining = await asyncio.to_thread(replay_failed_callbacks)
-    return {"total": total, "replayed": ok, "still_failing": remaining}
+    result = await asyncio.to_thread(replay_failed_callbacks)
+    return result.to_dict()
 
 
 # --- Background Task Decomposition ---

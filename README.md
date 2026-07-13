@@ -19,16 +19,18 @@ User -> Nginx:8080 -> PHP-FPM Symfony
            |
            | HTTP POST http://python-evaluator:8000/evaluate {submissionId, repoUrl, challengeText, callbackUrl, token}
            v
-     Python FastAPI: 202 Accepted + BackgroundTask
-           - git clone --depth 1
-           - file_collector: walk ignoring node_modules, vendor, .git etc, collect tree + truncated contents (25k chars)
-           - prompts: build_evaluation_prompt
-            - llm_provider: try Groq llama-3.3-70b-versatile, on failure Gemini gemini-2.0-flash-lite via LangChain, JsonOutputParser, fallback heuristic if no keys
-           - result {approved: bool, summary, improvements[], reasoning}
-           - callback POST to Symfony /api/internal/evaluation-result with tenacity retry 5x (2s...30s exponential)
-           -> Logs failed callbacks to /tmp/failed_callbacks.jsonl for manual replay
-           v
-     Symfony CallbackController validates X-Internal-Token, updates submission APPROVED/REJECTED + json result
+      Python FastAPI: 202 Accepted + BackgroundTask (lifespan starts replay cron)
+            - git clone --depth 1
+            - file_collector: walk ignoring node_modules, vendor, .git etc, collect tree + truncated contents (25k chars)
+            - prompts: build_evaluation_prompt
+             - llm_provider: try Groq llama-3.3-70b-versatile, on failure Gemini gemini-2.0-flash-lite via LangChain, JsonOutputParser, fallback heuristic if no keys
+            - result {approved: bool, summary, improvements[], reasoning}
+            - callback POST to Symfony /api/internal/evaluation-result with tenacity retry 5x (2s,4s,8s,16s,30s = 60s window)
+            -> On final failure: persisted to /tmp/failed_callbacks.jsonl (DLQ)
+            -> Cron: callback_replayer.py loop every 60s (asyncio.to_thread) replays DLQ, atomic rewrite, clears on success
+            -> Admin: GET /admin/replay-status, POST /admin/replay-failed-callbacks
+            v
+      Symfony CallbackController validates X-Internal-Token, updates submission APPROVED/REJECTED + json result
            ^
            | Polling every 3s
      Browser: /submissions/{id} status page
@@ -48,10 +50,10 @@ For high throughput (>1k msg/min) RabbitMQ would give better performance, but fo
 
 **Failure handling**:
 
-1. PHP -> Python HTTP fails: Messenger retries, then moves to failed queue. Admin can retry.
-2. Python -> PHP callback fails: Tenacity retries 5x exponential, logs to file.
-3. Both down: Messages stay in DB, processed on restart.
-4. Manual retry endpoint: `POST /api/submissions/{id}/retry` re-dispatches.
+1. PHP -> Python HTTP fails (Symfony → Python down): Messenger retries 3x (2s*2 multiplier max 10s), then moves to `failed` transport `doctrine://default?queue_name=failed`. Inspect via `messenger:failed:show`, retry via `messenger:failed:retry`. Guarantees no message lost if Python is down.
+2. Python -> PHP callback fails (Symfony down during callback): Tenacity retries 5x (2s,4s,8s,16s,30s = 60s window) on `RequestError` + `HTTPStatusError`. On final failure, persisted to `/tmp/failed_callbacks.jsonl` (DLQ) via `_log_failed_callback`. Cron `callback_replayer.py` started in FastAPI `lifespan` every 60s (`asyncio.to_thread` + atomic rewrite) auto-replays DLQ when Symfony recovers. Proven: 70s outage → file created, submission `processing`, nginx up → replay `1/1 recovered`, file cleared, `approved`. Admin endpoints: `GET /admin/replay-status`, `POST /admin/replay-failed-callbacks` for manual trigger.
+3. Both down: Messenger messages stay in Postgres, callbacks stay in DLQ file (survives container restart if volume mounted), both processed on restart via cron.
+4. Manual retry: `POST /api/submissions/{id}/retry` re-dispatches (re-clones + re-evaluates) and `POST /admin/replay-failed-callbacks` replays only callback without re-evaluating.
 
 ## Quick Start
 
@@ -148,6 +150,13 @@ curl -X POST http://localhost:8080/api/submissions/<id>/retry
 ```bash
 # Health
 curl http://localhost:8001/health
+# {"status":"ok","llm_provider":"groq","groq_configured":true,"gemini_configured":false}
+
+# DLQ status & manual replay (cron auto-replays every 60s)
+curl http://localhost:8001/admin/replay-status
+# {"failed_callbacks":0,"path":"/tmp/failed_callbacks.jsonl","replay_interval":60}
+curl -X POST http://localhost:8001/admin/replay-failed-callbacks
+# {"total":1,"replayed":1,"still_failing":0}
 
 # Direct evaluate (webhook payload from Symfony)
 curl -X POST http://localhost:8001/evaluate -H "Content-Type: application/json" \
@@ -160,7 +169,7 @@ curl -X POST http://localhost:8001/evaluate -H "Content-Type: application/json" 
   }'
 ```
 
-Response 202 Accepted, background task starts.
+Response 202 Accepted, background task starts. Callback retries 5x then DLQ + cron guarantees delivery.
 
 ## Entities
 
@@ -206,7 +215,7 @@ Coverage:
 
 ```bash
 docker compose exec python-evaluator pytest -v
-# 22 tests
+# 25 tests
 ```
 
 Coverage:
@@ -217,6 +226,7 @@ Coverage:
 - evaluator: no-keys heuristic, empty repo
 - main: root, health, evaluate accepts, invalid challenge text
 - callback: success, failure retries, payload structure
+- callback_replayer: empty no file, success clears file, keeps failed (new cron DLQ logic)
 
 ### E2E Manual Test
 
@@ -266,16 +276,18 @@ LLM_PROVIDER=auto|groq|gemini
 │   └── tests/
 ├── python-service/
 │   ├── app/
-│   │   ├── main.py (FastAPI)
-│   │   ├── config.py
+│   │   ├── main.py (FastAPI + lifespan cron for DLQ replay, admin endpoints)
+│   │   ├── config.py (Groq/Gemini only + failed_callbacks_path + replay interval)
 │   │   ├── models.py
 │   │   ├── repo_cloner.py
 │   │   ├── file_collector.py
 │   │   ├── prompts.py
 │   │   ├── llm_provider.py (Groq+Gemini fallback)
 │   │   ├── evaluator.py
-│   │   └── symfony_client.py (tenacity retry)
+│   │   ├── symfony_client.py (tenacity retry + DLQ logging)
+│   │   └── callback_replayer.py (new: replay_failed_callbacks + replay_loop every 60s)
 │   └── tests/
+│       └── test_callback_replayer.py (DLQ unit tests)
 └── README.md
 ```
 
