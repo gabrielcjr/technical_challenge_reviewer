@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+# Cancel previous runs if new commit pushed to same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build containers & run tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare .env file
+        run: |
+          cp .env.example .env || true
+          cat > .env <<'EOF'
+          POSTGRES_DB=challenge_reviewer
+          POSTGRES_USER=app
+          POSTGRES_PASSWORD=app
+          POSTGRES_PORT=5432
+          DATABASE_URL=postgresql://app:app@database:5432/challenge_reviewer?serverVersion=17&charset=utf8
+          MESSENGER_TRANSPORT_DSN=doctrine://default?queue_name=async
+          APP_SECRET=test_random_secret_for_ci_32_chars_long
+          APP_ENV=test
+          SYMFONY_PORT=8080
+          SYMFONY_APP_URL=http://localhost:8080
+          PYTHON_EVALUATOR_URL=http://python-evaluator:8000
+          CALLBACK_TOKEN=s3cr3t_shared_token_change_me
+          CALLBACK_TOKEN_SHARED=s3cr3t_shared_token_change_me
+          EVALUATOR_PORT=8001
+          GROQ_API_KEY=dummy_key_for_ci
+          GEMINI_API_KEY=dummy_key_for_ci
+          LLM_PROVIDER=auto
+          SYMFONY_CALLBACK_URL=http://nginx/api/internal/evaluation-result
+          SYMFONY_INTERNAL_CALLBACK_URL=http://nginx/api/internal/evaluation-result
+          COMPOSER_ALLOW_SUPERUSER=1
+          EOF
+          cat .env
+
+      - name: Build Docker images
+        run: docker compose build --no-cache
+
+      - name: Start database and wait for healthy
+        run: |
+          docker compose up -d database
+          echo "Waiting for postgres to be healthy..."
+          timeout 60 bash -c 'until docker inspect --format="{{.State.Health.Status}}" challenge_db | grep -q "healthy"; do sleep 2; echo "waiting..."; done'
+          docker compose ps
+          docker compose logs database
+
+      - name: Start PHP and Python services
+        run: |
+          docker compose up -d php nginx python-evaluator php-worker
+          docker compose ps
+          # Give services a moment to initialize
+          sleep 5
+
+      - name: Install Symfony dependencies (inside container)
+        run: |
+          docker compose exec -T php bash -c "composer install --no-progress --prefer-dist --no-interaction || composer install --no-progress"
+          docker compose exec -T php php -v
+          docker compose exec -T php php bin/console --version
+
+      - name: Prepare Symfony test database
+        run: |
+          docker compose exec -T php php bin/console doctrine:database:create --env=test --if-not-exists --no-interaction
+          docker compose exec -T php php bin/console doctrine:migrations:migrate --env=test --no-interaction
+          docker compose exec -T php php bin/console messenger:setup-transports --env=test --no-interaction || echo "messenger setup failed, continuing"
+          docker compose exec -T php php bin/console cache:clear --env=test || true
+
+      - name: Run Symfony PHP tests
+        run: |
+          docker compose exec -T php php bin/phpunit --testdox --colors=always
+
+      - name: Run Python evaluator tests
+        run: |
+          docker compose exec -T python-evaluator pytest -v --color=yes
+          docker compose exec -T python-evaluator python -m py_compile app/*.py || true
+
+      - name: Verify services health
+        if: always()
+        run: |
+          echo "=== docker compose ps ==="
+          docker compose ps -a
+          echo "=== PHP health ==="
+          docker compose exec -T php php bin/console about || true
+          echo "=== Python health check ==="
+          curl -sf http://localhost:8001/health || docker compose exec -T python-evaluator curl -sf http://localhost:8000/health || echo "health endpoint not reachable via localhost, checking inside network"
+          docker compose exec -T python-evaluator python -c "import app.main; print('FastAPI app import OK')" || true
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          echo "=== database logs ==="
+          docker compose logs --tail=200 database || true
+          echo "=== php logs ==="
+          docker compose logs --tail=200 php || true
+          echo "=== nginx logs ==="
+          docker compose logs --tail=200 nginx || true
+          echo "=== python-evaluator logs ==="
+          docker compose logs --tail=200 python-evaluator || true
+          echo "=== php-worker logs ==="
+          docker compose logs --tail=200 php-worker || true
+
+      - name: Tear down
+        if: always()
+        run: |
+          docker compose down -v
+          docker system prune -f || true
