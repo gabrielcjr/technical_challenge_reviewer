@@ -1,0 +1,98 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Home - Challenge Reviewer{% endblock %}
+
+{% block body %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div class="lg:col-span-2">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-bold text-gray-900">Recent Submissions</h1>
+            <a href="{{ path('submission_new') }}" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                <i class="fas fa-plus mr-2"></i>New Submission
+            </a>
+        </div>
+
+        {% if submissions is empty %}
+            <div class="bg-white p-8 rounded shadow text-center text-gray-500">
+                No submissions yet. <a href="{{ path('submission_new') }}" class="text-blue-600 underline">Create one</a>.
+            </div>
+        {% else %}
+            <div class="bg-white shadow overflow-hidden rounded">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Repo</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                            <th class="px-6 py-3"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        {% for s in submissions %}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ s.userName }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 truncate max-w-xs">
+                                <a href="{{ s.githubRepoUrl }}" target="_blank" class="text-blue-600 hover:underline">{{ s.githubRepoUrl|length > 40 ? s.githubRepoUrl|slice(0,40) ~ '...' : s.githubRepoUrl }}</a>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                {% set status = s.status.value %}
+                                <span class="px-2 py-1 text-xs rounded-full
+                                    {% if status == 'approved' %}bg-green-100 text-green-800
+                                    {% elseif status == 'rejected' %}bg-red-100 text-red-800
+                                    {% elseif status == 'failed' %}bg-gray-100 text-gray-800
+                                    {% elseif status == 'processing' %}bg-yellow-100 text-yellow-800
+                                    {% else %}bg-blue-100 text-blue-800{% endif %}">
+                                    {{ s.status.label() }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 text-sm text-gray-500">{{ s.createdAt|date('Y-m-d H:i') }}</td>
+                            <td class="px-6 py-4 text-right text-sm">
+                                <a href="{{ path('submission_show', {id: s.id.toRfc4122()}) }}" class="text-blue-600 hover:underline">View</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+
+    <div>
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-bold text-gray-900">Challenges</h2>
+            <a href="{{ path('challenge_new_form') }}" class="text-sm bg-gray-800 text-white px-3 py-1 rounded">+ New</a>
+        </div>
+
+        {% if challenges is empty %}
+            <div class="bg-white p-6 rounded shadow text-center text-gray-500 text-sm">
+                No challenges defined. Create one or use custom text when submitting.
+            </div>
+        {% else %}
+            <div class="space-y-4">
+                {% for c in challenges %}
+                <div class="bg-white p-4 rounded shadow">
+                    <h3 class="font-semibold text-gray-900">{{ c.title }}</h3>
+                    <p class="text-sm text-gray-600 mt-2 line-clamp-3">{{ c.description|length > 150 ? c.description|slice(0,150) ~ '...' : c.description }}</p>
+                    <p class="text-xs text-gray-400 mt-2">{{ c.createdAt|date('Y-m-d') }}</p>
+                    <p class="text-xs font-mono bg-gray-100 p-1 mt-2 rounded break-all">{{ c.id.toRfc4122() }}</p>
+                </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="mt-8 bg-blue-50 p-4 rounded border border-blue-200">
+            <h3 class="font-semibold text-blue-900 text-sm">How it works</h3>
+            <ol class="text-sm text-blue-800 mt-2 list-decimal list-inside space-y-1">
+                <li>User submits GitHub repo + challenge</li>
+                <li>Symfony persists & dispatches Messenger message (Doctrine transport)</li>
+                <li>php-worker consumes -> HTTP webhook to Python FastAPI</li>
+                <li>Python clones repo, collects files, LangChain evaluates via Grok/Gemini</li>
+                <li>Python callbacks Symfony with approved/rejected + improvements</li>
+                <li>User polls status page</li>
+            </ol>
+            <p class="text-xs text-blue-600 mt-3">Failure handling: Messenger retries 3x + failed queue. Python retries callback 5x. No RabbitMQ needed for MVP.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

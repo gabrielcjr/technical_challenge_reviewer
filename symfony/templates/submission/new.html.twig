@@ -1,0 +1,110 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}New Submission{% endblock %}
+
+{% block body %}
+<div class="max-w-2xl mx-auto">
+    <h1 class="text-2xl font-bold mb-6">Submit Challenge Solution</h1>
+
+    <form method="POST" action="{{ path('api_submission_create') }}" id="submissionForm" class="bg-white p-6 rounded shadow space-y-6">
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Your Name *</label>
+            <input type="text" name="userName" required class="mt-1 block w-full border border-gray-300 rounded px-3 py-2" placeholder="John Doe">
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700">GitHub Repository URL * (public)</label>
+            <input type="url" name="githubRepoUrl" required class="mt-1 block w-full border border-gray-300 rounded px-3 py-2" placeholder="https://github.com/username/challenge-repo">
+            <p class="text-xs text-gray-500 mt-1">Must be a public GitHub repo URL</p>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Challenge</label>
+            <select name="challengeId" id="challengeSelect" class="mt-1 block w-full border border-gray-300 rounded px-3 py-2">
+                <option value="">-- Use custom challenge text --</option>
+                {% for c in challenges %}
+                <option value="{{ c.id.toRfc4122() }}">{{ c.title }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div id="challengePreview" class="hidden bg-gray-50 p-3 rounded text-sm text-gray-700"></div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Custom Challenge Text * (if no challenge selected)</label>
+            <textarea name="customChallengeText" id="customChallenge" rows="6" class="mt-1 block w-full border border-gray-300 rounded px-3 py-2" placeholder="Describe the challenge requirements... e.g., Build a REST API with Symfony that..."></textarea>
+            <p class="text-xs text-gray-500 mt-1">Min 20 chars. This text will be sent to AI evaluator along with repo.</p>
+        </div>
+
+        <div class="flex justify-between">
+            <a href="{{ path('home') }}" class="px-4 py-2 border rounded text-gray-700">Cancel</a>
+            <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">Submit for Evaluation</button>
+        </div>
+    </form>
+
+    <div id="result" class="mt-6 hidden"></div>
+</div>
+
+{% block javascripts %}
+<script>
+const challenges = {
+    {% for c in challenges %}
+    "{{ c.id.toRfc4122() }}": {{ c.description|json_encode|raw }},
+    {% endfor %}
+};
+
+document.getElementById('challengeSelect').addEventListener('change', function() {
+    const preview = document.getElementById('challengePreview');
+    const custom = document.getElementById('customChallenge');
+    const id = this.value;
+    if (id && challenges[id]) {
+        preview.textContent = challenges[id];
+        preview.classList.remove('hidden');
+        custom.value = challenges[id];
+    } else {
+        preview.classList.add('hidden');
+        custom.value = '';
+    }
+});
+
+document.getElementById('submissionForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const payload = {
+        userName: formData.get('userName'),
+        githubRepoUrl: formData.get('githubRepoUrl'),
+        challengeId: formData.get('challengeId') || null,
+        customChallengeText: formData.get('customChallengeText')
+    };
+
+    if (!payload.challengeId && !payload.customChallengeText) {
+        alert('Please select a challenge or enter custom challenge text');
+        return;
+    }
+
+    const resultDiv = document.getElementById('result');
+    resultDiv.classList.remove('hidden');
+    resultDiv.innerHTML = '<p class="text-blue-600">Submitting...</p>';
+
+    try {
+        const res = await fetch(this.action, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+            resultDiv.innerHTML = `<div class="bg-green-50 p-4 rounded border border-green-200"><p class="text-green-800">Submission created! ID: ${data.id}</p><p class="mt-2"><a href="/submissions/${data.id}" class="text-blue-600 underline">Go to status page</a></p></div>`;
+            setTimeout(() => window.location.href = `/submissions/${data.id}`, 1000);
+        } else {
+            resultDiv.innerHTML = `<div class="bg-red-50 p-4 rounded border border-red-200"><p class="text-red-800">Error: ${JSON.stringify(data)}</p></div>`;
+        }
+    } catch (err) {
+        resultDiv.innerHTML = `<div class="bg-red-50 p-4 rounded"><p class="text-red-800">Network error: ${err.message}. Trying classic form submit...</p></div>`;
+        // fallback submit as form
+        this.submit();
+    }
+});
+</script>
+{% endblock %}
+{% endblock %}

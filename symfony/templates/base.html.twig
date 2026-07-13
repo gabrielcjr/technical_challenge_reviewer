@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <title>{% block title %}Challenge Reviewer{% endblock %}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+        {% block stylesheets %}{% endblock %}
+    </head>
+    <body class="bg-gray-50 min-h-screen">
+        <nav class="bg-white shadow-sm border-b">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16">
+                    <div class="flex items-center">
+                        <a href="{{ path('home') }}" class="text-xl font-bold text-gray-900">
+                            <i class="fas fa-code-branch mr-2"></i>Challenge Reviewer
+                        </a>
+                        <div class="ml-10 flex space-x-4">
+                            <a href="{{ path('home') }}" class="text-gray-700 hover:text-gray-900 px-3 py-2">Home</a>
+                            <a href="{{ path('submission_new') }}" class="text-gray-700 hover:text-gray-900 px-3 py-2">New Submission</a>
+                            <a href="{{ path('challenge_new_form') }}" class="text-gray-700 hover:text-gray-900 px-3 py-2">New Challenge</a>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <span class="text-sm text-gray-500">Symfony 7.3 + Python AI Evaluator</span>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            {% for label, messages in app.flashes %}
+                {% for message in messages %}
+                    <div class="mb-4 p-4 rounded {% if label == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endfor %}
+
+            {% block body %}{% endblock %}
+        </main>
+
+        <footer class="bg-white border-t mt-12 py-6">
+            <div class="max-w-7xl mx-auto px-4 text-center text-gray-500 text-sm">
+                Technical Challenge Reviewer - PHP 8.4 / Symfony 7.3 / Postgres 17 / FastAPI + LangChain + Grok/Gemini
+            </div>
+        </footer>
+
+        {% block javascripts %}{% endblock %}
+    </body>
+</html>

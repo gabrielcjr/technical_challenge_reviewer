@@ -1,0 +1,161 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Submission {{ submission.id.toRfc4122() }}{% endblock %}
+
+{% block body %}
+<div class="max-w-3xl mx-auto">
+    <div class="mb-4">
+        <a href="{{ path('home') }}" class="text-blue-600 hover:underline">&larr; Back to Home</a>
+    </div>
+
+    <div class="bg-white shadow rounded p-6">
+        <div class="flex justify-between items-start">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-900">Submission by {{ submission.userName }}</h1>
+                <p class="text-sm text-gray-500 mt-1">ID: {{ submission.id.toRfc4122() }}</p>
+                <p class="text-sm text-gray-500">Created: {{ submission.createdAt|date('Y-m-d H:i:s') }}</p>
+            </div>
+            <div id="statusBadge" class="px-4 py-2 rounded-full text-sm font-medium
+                {% if submission.status.value == 'approved' %}bg-green-100 text-green-800
+                {% elseif submission.status.value == 'rejected' %}bg-red-100 text-red-800
+                {% elseif submission.status.value == 'failed' %}bg-gray-100 text-gray-800
+                {% elseif submission.status.value == 'processing' %}bg-yellow-100 text-yellow-800
+                {% else %}bg-blue-100 text-blue-800{% endif %}">
+                {{ submission.status.label() }}
+            </div>
+        </div>
+
+        <div class="mt-6 grid grid-cols-1 gap-4">
+            <div>
+                <h3 class="text-sm font-medium text-gray-700">GitHub Repo</h3>
+                <a href="{{ submission.githubRepoUrl }}" target="_blank" class="text-blue-600 hover:underline break-all">{{ submission.githubRepoUrl }}</a>
+            </div>
+
+            <div>
+                <h3 class="text-sm font-medium text-gray-700">Challenge</h3>
+                {% if submission.challenge %}
+                    <p class="text-sm font-semibold">{{ submission.challenge.title }}</p>
+                {% endif %}
+                <div class="mt-2 bg-gray-50 p-3 rounded text-sm whitespace-pre-wrap">{{ submission.challengeSnapshot }}</div>
+            </div>
+
+            <div id="evaluationSection">
+                {% if submission.evaluationResult %}
+                    <h3 class="text-sm font-medium text-gray-700 mt-4">Evaluation Result</h3>
+                    <div class="mt-2 p-4 rounded border {% if submission.approved %}border-green-200 bg-green-50{% else %}border-red-200 bg-red-50{% endif %}">
+                        <p class="font-semibold {% if submission.approved %}text-green-800{% else %}text-red-800{% endif %}">
+                            {% if submission.approved %}✅ Approved{% else %}❌ Not Approved{% endif %}
+                        </p>
+                        <p class="mt-2 text-sm text-gray-800">{{ submission.evaluationResult.summary ?? '' }}</p>
+
+                        {% if submission.evaluationResult.improvements is defined and submission.evaluationResult.improvements|length > 0 %}
+                        <div class="mt-4">
+                            <h4 class="text-sm font-medium">Improvements / Feedback:</h4>
+                            <ul class="list-disc list-inside mt-1 text-sm text-gray-700">
+                                {% for imp in submission.evaluationResult.improvements %}
+                                <li>{{ imp }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+
+                        {% if submission.evaluationResult.reasoning %}
+                        <div class="mt-4">
+                            <h4 class="text-sm font-medium">Reasoning:</h4>
+                            <p class="text-sm text-gray-600 whitespace-pre-wrap">{{ submission.evaluationResult.reasoning }}</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                {% else %}
+                    <div class="mt-4 p-4 bg-blue-50 border border-blue-200 rounded">
+                        <p class="text-blue-800 text-sm">
+                            <i class="fas fa-spinner fa-spin mr-2"></i>
+                            <span id="pollingText">Evaluation in progress... This may take 30-60 seconds (cloning + AI analysis).</span>
+                        </p>
+                        <div class="mt-2 text-xs text-blue-600">
+                            Status is polled every 3 seconds. Messenger Doctrine transport ensures reliable delivery.
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+
+            {% if submission.processingLogs %}
+            <div class="mt-4">
+                <h3 class="text-sm font-medium text-gray-700">Logs</h3>
+                <pre class="bg-gray-100 p-3 rounded text-xs mt-1 whitespace-pre-wrap">{{ submission.processingLogs }}</pre>
+            </div>
+            {% endif %}
+
+            <div class="mt-6 flex space-x-3">
+                <button id="retryBtn" class="px-4 py-2 bg-gray-800 text-white rounded text-sm hover:bg-gray-700">Retry Evaluation</button>
+                <button id="refreshBtn" class="px-4 py-2 border rounded text-sm">Manual Refresh</button>
+            </div>
+
+            <div class="mt-6 text-xs text-gray-500 border-t pt-4">
+                <p>API endpoint: <code class="bg-gray-100 px-1">GET /api/submissions/{{ submission.id.toRfc4122() }}</code></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block javascripts %}
+<script>
+const submissionId = "{{ submission.id.toRfc4122() }}";
+let pollingInterval = null;
+let isFinal = {{ submission.status.isFinal() ? 'true' : 'false' }};
+
+function updateBadge(status, approved) {
+    const badge = document.getElementById('statusBadge');
+    badge.textContent = status;
+    badge.className = 'px-4 py-2 rounded-full text-sm font-medium ' +
+        (status === 'approved' ? 'bg-green-100 text-green-800' :
+         status === 'rejected' ? 'bg-red-100 text-red-800' :
+         status === 'failed' ? 'bg-gray-100 text-gray-800' :
+         status === 'processing' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800');
+}
+
+async function fetchStatus() {
+    try {
+        const res = await fetch(`/api/submissions/${submissionId}`, { headers: { 'Accept': 'application/json' }});
+        if (!res.ok) throw new Error('Fetch failed');
+        const data = await res.json();
+        updateBadge(data.status, data.approved);
+
+        if (data.status === 'approved' || data.status === 'rejected' || data.status === 'failed') {
+            isFinal = true;
+            if (pollingInterval) clearInterval(pollingInterval);
+            document.getElementById('pollingText') ? document.getElementById('pollingText').textContent = 'Evaluation completed!' : null;
+
+            // Reload to show evaluation result nicely rendered server side
+            if (data.evaluation) {
+                window.location.reload();
+            }
+        } else {
+            document.getElementById('pollingText') && (document.getElementById('pollingText').textContent = `Status: ${data.status} - polling...`);
+        }
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+if (!isFinal) {
+    pollingInterval = setInterval(fetchStatus, 3000);
+    fetchStatus();
+}
+
+document.getElementById('refreshBtn').addEventListener('click', () => fetchStatus() || window.location.reload());
+
+document.getElementById('retryBtn').addEventListener('click', async () => {
+    if (!confirm('Retry evaluation? This will re-queue the submission.')) return;
+    const res = await fetch(`/api/submissions/${submissionId}/retry`, { method: 'POST', headers: { 'Accept': 'application/json'}});
+    const data = await res.json();
+    alert(JSON.stringify(data));
+    if (res.ok) {
+        isFinal = false;
+        updateBadge('pending', null);
+        if (!pollingInterval) pollingInterval = setInterval(fetchStatus, 3000);
+    }
+});
+</script>
+{% endblock %}
+{% endblock %}
