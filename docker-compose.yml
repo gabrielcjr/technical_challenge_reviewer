@@ -95,7 +95,7 @@ services:
     environment:
       DATABASE_URL: postgresql://app:app@database:5432/challenge_reviewer?serverVersion=17&charset=utf8
       MESSENGER_TRANSPORT_DSN: ${MESSENGER_TRANSPORT_DSN}
-    command: ["sh", "-c", "sleep 5 && php bin/console messenger:consume async --time-limit=3600 --sleep=1 -vv"]
+    command: ["sh", "-c", "until php bin/console doctrine:query:sql 'SELECT 1' >/dev/null 2>&1; do echo 'Waiting for database...'; sleep 2; done && php bin/console messenger:consume async --time-limit=3600 --sleep=1 -vv"]
     networks:
       - app-network
 
