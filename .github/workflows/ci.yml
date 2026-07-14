@@ -37,6 +37,7 @@ jobs:
       - name: Prepare .env file
         run: |
           cp .env.example .env || true
+          cp symfony/.env.example symfony/.env || true
           cat > .env <<'EOF'
           POSTGRES_DB=challenge_reviewer
           POSTGRES_USER=app
