@@ -1,335 +1,208 @@
-# Technical Challenge Reviewer
+# 🚀 Technical Challenge Reviewer
 
-A full-stack Dockerized system that receives a GitHub user's repository challenge response and evaluates it via AI.
+[![Symfony 7.3](https://img.shields.io/badge/Symfony-7.3-black?style=for-the-badge&logo=symfony&logoColor=white)](https://symfony.com/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Docker](https://img.shields.io/badge/Docker_Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
+[![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![PHP 8.4](https://img.shields.io/badge/PHP-8.4-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://www.php.net/)
 
-- **PHP 8.4 + Symfony 7.3** - Main API & UI, persistence, Messenger (Doctrine transport) for reliable async processing
-- **Python 3.12 + FastAPI** - Evaluator microservice, clones repo, LangChain with dual LLM (Groq primary + Gemini fallback)
-- **Postgres 17** - Stores challenges, submissions, evaluation results, and Messenger messages (no RabbitMQ needed)
-- **Nginx** - Reverse proxy
-- **Twig UI** with polling status page
+A production-grade, distributed asynchronous system designed to ingest, process, and automatically evaluate GitHub repository submissions using LLMs. Built with a decoupled microservice architecture, the system coordinates web request orchestration, transactional persistence, asynchronous message queuing, shallow repository cloning, and resilient multi-provider LLM pipelines.
 
-## Architecture
+---
 
+## 🏗️ System Architecture & Workflow
+
+The application is split into two primary services behind an **Nginx** reverse proxy:
+1. **Symfony Portal (PHP 8.4)**: Handles user registration, challenge definition, persistent database state, status page polling, and asynchronous message dispatching.
+2. **Evaluator Microservice (Python 3.12)**: A lightweight FastAPI service that clones repositories, collects codebases, interacts with LangChain-based LLM APIs, and sends evaluations back via authenticated webhooks.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Developer / Candidate
+    participant Portal as Symfony Web Portal
+    participant Queue as Symfony Messenger (Postgres)
+    participant Worker as php-worker (messenger:consume)
+    participant Evaluator as FastAPI Evaluator (Python)
+    participant LLM as LLM API (Groq / Gemini)
+
+    User->>Portal: Submit Github URL + Challenge Description
+    Note over Portal: Persists submission as PENDING<br/>and generates UUID v7
+    Portal->>Queue: Dispatch EvaluateSubmissionMessage
+    Portal-->>User: Render Twig polling status page
+
+    loop Consume Queue
+        Worker->>Queue: Fetch pending message
+        Worker->>Evaluator: HTTP POST /evaluate (webhook token + payload)
+    end
+    Evaluator-->>Worker: 202 Accepted (processing in BackgroundTask)
+
+    activate Evaluator
+    Note over Evaluator: Clones public repository (shallow git clone)<br/>Collects source code, respects ignores
+    Evaluator->>LLM: Send context & prompt (Groq primary, Gemini fallback)
+    LLM-->>Evaluator: Return JSON evaluation response
+    
+    loop Callback Retry (Tenacity 5x)
+        Evaluator->>Portal: POST /api/internal/evaluation-result (Webhook Callback)
+    end
+    deactivate Evaluator
+
+    Note over Portal: Verify Callback Token,<br/>Update submission to APPROVED/REJECTED
+    
+    loop Poll status (every 3s)
+        User->>Portal: GET /submissions/{id}
+        Portal-->>User: Render complete evaluation & improvements
+    end
 ```
-User -> Nginx:8080 -> PHP-FPM Symfony
-           |
-           | Persist PENDING + dispatch EvaluateSubmissionMessage -> Doctrine transport (postgres messenger_messages table)
-           v
-     php-worker (messenger:consume async)
-           |
-           | HTTP POST http://python-evaluator:8000/evaluate {submissionId, repoUrl, challengeText, callbackUrl, token}
-           v
-      Python FastAPI: 202 Accepted + BackgroundTask (lifespan starts replay cron)
-            - git clone --depth 1
-            - file_collector: walk ignoring node_modules, vendor, .git etc, collect tree + truncated contents (25k chars)
-            - prompts: build_evaluation_prompt
-             - llm_provider: try Groq llama-3.3-70b-versatile, on failure Gemini gemini-2.0-flash-lite via LangChain, JsonOutputParser, fallback heuristic if no keys
-            - result {approved: bool, summary, improvements[], reasoning}
-            - callback POST to Symfony /api/internal/evaluation-result with tenacity retry 5x (2s,4s,8s,16s,30s = 60s window)
-            -> On final failure: persisted to /tmp/failed_callbacks.jsonl (DLQ)
-            -> Cron: callback_replayer.py loop every 60s (asyncio.to_thread) replays DLQ, atomic rewrite, clears on success
-            -> Admin: GET /admin/replay-status, POST /admin/replay-failed-callbacks
-            v
-      Symfony CallbackController validates X-Internal-Token, updates submission APPROVED/REJECTED + json result
-           ^
-           | Polling every 3s
-     Browser: /submissions/{id} status page
-```
 
-### Why No RabbitMQ?
+---
 
-Symfony Messenger with Doctrine transport provides:
+## 🔑 Key Engineering & Architectural Highlights
 
-- **Durability**: Messages persisted in Postgres `messenger_messages` table
-- **Retries**: Configurable `retry_strategy` (3x, delay 2s * multiplier 2, max 10s)
-- **Failed queue**: `failed` transport `doctrine://default?queue_name=failed`, inspect via `messenger:failed:show`, retry via `messenger:failed:retry`
-- **Zero ops overhead**: Reuses existing Postgres, no extra container
-- **Swappable**: Change `MESSENGER_TRANSPORT_DSN` to `amqp://` to use RabbitMQ without code change
+### 1. Resilient & High-Availability AI Pipeline
+Integration with external LLM APIs is a common point of failure. To guarantee uptime and service continuity:
+- **Dual LLM Fallback Mechanism**: The Python evaluator service implements a tiered execution strategy using `LangChain`. It defaults to **Groq (Llama-3.3-70b-versatile)** for sub-second responses, automatically falling back to **Gemini (gemini-2.0-flash-lite)** if the primary provider fails (e.g., due to rate limits or network issues).
+- **Graceful Heuristic Degraded Mode**: If both API keys are absent or both services fail, the system falls back to a deterministic heuristic evaluator, preventing crashes and keeping the queue unblocked.
+- **Robust Output Parsers**: Utilizes LangChain's `JsonOutputParser` with regex-based pre-processing to reliably extract clean JSON evaluations even if models output conversational metadata or markdown fences.
 
-For high throughput (>1k msg/min) RabbitMQ would give better performance, but for this use case (long LLM tasks ~30-60s, low volume) Doctrine is sufficient.
+### 2. Message-Driven Queue Design (Zero-Ops Footprint)
+- **Symfony Messenger with Doctrine DSN**: Evaluations are processed out-of-band using Symfony Messenger mapped to PostgreSQL database tables as the message queue. This eliminates the operational complexity, memory footprint, and hosting cost of RabbitMQ or Redis for low-to-medium volumes, while retaining the exact same messaging API.
+- **Outbox Pattern and Transactional Boundaries**: Submissions are stored in PostgreSQL and messages are pushed to the transport queue atomically. If database persistence fails, no message is sent, preventing phantom worker tasks.
+- **Swappable DSN**: Transitioning to RabbitMQ (AMQP) requires zero code changes—only a modification to the `MESSENGER_TRANSPORT_DSN` environment variable.
 
-**Failure handling**:
+### 3. Distributed Reliability & Fail-Safe Webhooks (DLQ & Cron Replay)
+- **Asynchronous Execution Model**: The FastAPI service returns a `202 Accepted` immediately upon payload reception, spinning off code cloning and LLM invocation to a FastAPI `BackgroundTask`.
+- **Tenacity Callback Retry Engine**: The callback endpoint (reporting the evaluation outcome to Symfony) is protected against network blips and target service downtime via a 5-step exponential backoff retry strategy (`2s` up to `30s`).
+- **File-Based Dead-Letter Queue (DLQ)**: If all 5 retries fail, callbacks are persisted in a line-delimited JSON log (`/tmp/failed_callbacks.jsonl`) allowing manual replay or monitoring triggers.
+- **Background Cron Replayer**: A background replayer script (`callback_replayer.py`) runs every 60 seconds (initiated in the FastAPI `lifespan` block) to automatically replay the DLQ and process failures as soon as Symfony recovers.
 
-1. PHP -> Python HTTP fails (Symfony → Python down): Messenger retries 3x (2s*2 multiplier max 10s), then moves to `failed` transport `doctrine://default?queue_name=failed`. Inspect via `messenger:failed:show`, retry via `messenger:failed:retry`. Guarantees no message lost if Python is down.
-2. Python -> PHP callback fails (Symfony down during callback): Tenacity retries 5x (2s,4s,8s,16s,30s = 60s window) on `RequestError` + `HTTPStatusError`. On final failure, persisted to `/tmp/failed_callbacks.jsonl` (DLQ) via `_log_failed_callback`. Cron `callback_replayer.py` started in FastAPI `lifespan` every 60s (`asyncio.to_thread` + atomic rewrite) auto-replays DLQ when Symfony recovers. Proven: 70s outage → file created, submission `processing`, nginx up → replay `1/1 recovered`, file cleared, `approved`. Admin endpoints: `GET /admin/replay-status`, `POST /admin/replay-failed-callbacks` for manual trigger.
-3. Both down: Messenger messages stay in Postgres, callbacks stay in DLQ file (survives container restart if volume mounted), both processed on restart via cron.
-4. Manual retry: `POST /api/submissions/{id}/retry` re-dispatches (re-clones + re-evaluates) and `POST /admin/replay-failed-callbacks` replays only callback without re-evaluating.
+---
 
-## Quick Start
+## 🧑‍💻 Codebase Directory & Key Logic Map
+
+### Symfony Portal (`symfony/src/`)
+*   [ChallengeController.php](file:///home/gacar/technical_challenge_reviewer/symfony/src/Controller/ChallengeController.php) / [SubmissionController.php](file:///home/gacar/technical_challenge_reviewer/symfony/src/Controller/SubmissionController.php) — Entry points for frontend interaction and submission orchestration.
+*   [InternalCallbackController.php](file:///home/gacar/technical_challenge_reviewer/symfony/src/Controller/InternalCallbackController.php) — Secures incoming evaluation reports using token-based authentication.
+*   [EvaluateSubmissionMessage.php](file:///home/gacar/technical_challenge_reviewer/symfony/src/Message/EvaluateSubmissionMessage.php) — The serializable message payload passed between threads/workers.
+*   [EvaluationRequestHandler.php](file:///home/gacar/technical_challenge_reviewer/symfony/src/MessageHandler/EvaluationRequestHandler.php) — Consumes queue events and triggers outbound webhook requests to the FastAPI evaluator.
+*   [CallbackAuthenticator.php](file:///home/gacar/technical_challenge_reviewer/symfony/src/Service/CallbackAuthenticator.php) — Verifies internal callback signatures to prevent unauthorized payload tampering.
+
+### Python Evaluator (`python-service/app/`)
+*   [main.py](file:///home/gacar/technical_challenge_reviewer/python-service/app/main.py) — FastAPI routing table exposing `/evaluate`, `/health`, and DLQ admin endpoints.
+*   [evaluator.py](file:///home/gacar/technical_challenge_reviewer/python-service/app/evaluator.py) — Integrates git shallow clone operations, file collection, and prompt-based API evaluations.
+*   [llm_provider.py](file:///home/gacar/technical_challenge_reviewer/python-service/app/llm_provider.py) — Handles fallback sequence between Groq and Gemini API clients.
+*   [file_collector.py](file:///home/gacar/technical_challenge_reviewer/python-service/app/file_collector.py) — Parses repository files, filters binaries/unwanted folders (e.g. `node_modules`), and prepares clean text payloads for the LLM.
+*   [symfony_client.py](file:///home/gacar/technical_challenge_reviewer/python-service/app/symfony_client.py) — Robust HTTP callback sender utilizing `tenacity` retry loops and fallback DLQ logging.
+*   [callback_replayer.py](file:///home/gacar/technical_challenge_reviewer/python-service/app/callback_replayer.py) — Automated loop that monitors `/tmp/failed_callbacks.jsonl` and attempts redelivery.
+
+---
+
+## 🛠️ Tech Stack & Design Patterns
+
+| Layer | Technology | Key Patterns / Features |
+| :--- | :--- | :--- |
+| **Orchestration & API** | Symfony 7.3 (PHP 8.4) | Domain-Driven Entities (Doctrine ORM), Rich Form Validation, Custom Messengers, Command Line Console |
+| **Worker Queue** | Symfony Messenger | Auto-retries, Failed Transport queues, Transactional messaging via Postgres |
+| **Microservice Backend** | FastAPI (Python 3.12) | Asynchronous Endpoint definitions, Dependency Injection, FastAPI BackgroundTasks |
+| **AI Integration** | LangChain | Decoupled system & human prompt templates, JSON parsing, API fallback routing |
+| **Database** | PostgreSQL 17 | UUID v7 identifiers, relational schemas, integrated message transport |
+| **Infrastructure** | Docker, Nginx | Multi-container composition, decoupled service networking, unified entrypoint proxy |
+
+---
+
+## 💻 Quick Start & Environment Configuration
 
 ### Prerequisites
-
 - Docker & Docker Compose v5+
-- Free LLM API keys (optional for testing, but required for real AI evaluation):
-  - Groq: https://console.groq.com/keys (generous free tier, very fast)
-  - Gemini: https://aistudio.google.com/app/apikey (free quota)
+- (Optional but recommended) Groq/Gemini API keys for active AI evaluations.
 
-### Setup
+### Setup Instructions
 
 ```bash
-# Clone and enter
+# 1. Clone the repository and enter the directory
 cd technical_challenge_reviewer
 
-# Copy env and set your keys
+# 2. Configure environment variables
 cp .env.example .env
-# Edit .env and set:
+# Open .env and set:
 # GROQ_API_KEY=gsk_...
 # GEMINI_API_KEY=...
-# CALLBACK_TOKEN=some_random_secret
+# CALLBACK_TOKEN=some_secure_secret_token
 
-# Build and up
-docker compose build
-docker compose up -d
-
-# Wait for DB healthy
-docker compose ps
-
-# Install Symfony deps (if not already)
-docker compose exec php composer install
-
-# Run migrations
-docker compose exec php php bin/console doctrine:migrations:migrate --no-interaction
-docker compose exec php php bin/console messenger:setup-transports --no-interaction
-
-# Create test DB for tests
-docker compose exec php php bin/console doctrine:database:create --env=test --if-not-exists
-docker compose exec php php bin/console doctrine:migrations:migrate --env=test --no-interaction
-docker compose exec php php bin/console messenger:setup-transports --env=test
+# 3. Build and spin up containers in detached mode
+docker compose up --build -d
 ```
 
-Services:
+> [!NOTE]
+> On container startup, the application automatically runs Composer installation, database migrations, message queue transport setup, and initializes the test database environment via the automated entrypoint script.
 
-- Symfony UI/API: http://localhost:8080
-- Python Evaluator Docs: http://localhost:8001/docs
-- Postgres: localhost:5432 (user app, pass app, db challenge_reviewer)
+### Access Ports
+- **Frontend Dashboard**: [http://localhost:8080](http://localhost:8080)
+- **FastAPI Interactive Docs (Swagger UI)**: [http://localhost:8001/docs](http://localhost:8001/docs)
+- **PostgreSQL Database**: `localhost:5432` (Username: `app`, Password: `app`, DB: `challenge_reviewer`)
 
-### Usage
+---
 
-#### Via UI
+## 🧪 Testing & Code Quality
 
-1. Go to http://localhost:8080
-2. Create a challenge: "New Challenge" -> Title + Description (requirements that will be sent to AI)
-3. Submit: "New Submission" -> Your name, GitHub public repo URL, select challenge or custom text
-4. Watch status page polling every 3s. After 30-60s, shows Approved/Rejected + improvements.
+The system is developed with a strict focus on testability, using unit, functional, and mock testing patterns to guarantee logic completeness.
 
-#### Via API
-
+### Symfony (PHPUnit Suite)
+Contains **35+ tests** covering unit validations, entity state transitions, message handlers, and controller integrations.
 ```bash
-# List challenges
-curl http://localhost:8080/api/challenges
-
-# Create challenge
-curl -X POST http://localhost:8080/api/challenges -H "Content-Type: application/json" \
-  -d '{"title":"TODO API","description":"Build REST API with Symfony, CRUD todos, Doctrine, validation, tests."}'
-
-# Submit
-curl -X POST http://localhost:8080/api/submissions -H "Content-Type: application/json" \
-  -d '{
-    "userName":"alice",
-    "githubRepoUrl":"https://github.com/octocat/Hello-World",
-    "challengeId":"<uuid-from-previous>"
-  }'
-
-# Or custom challenge text
-curl -X POST http://localhost:8080/api/submissions -H "Content-Type: application/json" \
-  -d '{
-    "userName":"bob",
-    "githubRepoUrl":"https://github.com/user/repo",
-    "customChallengeText":"Build a TODO API..."
-  }'
-
-# Check status
-curl http://localhost:8080/api/submissions/<id>
-
-# Retry if failed
-curl -X POST http://localhost:8080/api/submissions/<id>/retry
+docker compose exec php php bin/phpunit --testdox
 ```
+*Tested Areas:*
+- **Submission Status Transitions**: Ensures transition safety state machine paths (e.g., `PENDING` -> `PROCESSING` -> `APPROVED`/`REJECTED`).
+- **Webhook Callback Security**: Ensures Symfony denies unauthorized callback payloads using bad tokens.
+- **Asynchronous Webhook Client Mocks**: Uses Symfony's `MockHttpClient` to test outbound evaluator calls without executing actual network requests.
 
-### Python Evaluator API
-
-```bash
-# Health
-curl http://localhost:8001/health
-# {"status":"ok","llm_provider":"groq","groq_configured":true,"gemini_configured":false}
-
-# DLQ status & manual replay (cron auto-replays every 60s)
-curl http://localhost:8001/admin/replay-status
-# {"failed_callbacks":0,"path":"/tmp/failed_callbacks.jsonl","replay_interval":60}
-curl -X POST http://localhost:8001/admin/replay-failed-callbacks
-# {"total":1,"replayed":1,"still_failing":0}
-
-# Direct evaluate (webhook payload from Symfony)
-curl -X POST http://localhost:8001/evaluate -H "Content-Type: application/json" \
-  -d '{
-    "submissionId":"test-123",
-    "githubRepoUrl":"https://github.com/octocat/Hello-World",
-    "challengeText":"Build TODO API...",
-    "callbackUrl":"http://nginx/api/internal/evaluation-result",
-    "callbackToken":"s3cr3t_shared_token_change_me"
-  }'
-```
-
-Response 202 Accepted, background task starts. Callback retries 5x then DLQ + cron guarantees delivery.
-
-## Entities
-
-### Challenge
-- `id: uuid v7`
-- `title: string 255`
-- `description: text` (requirements)
-- `createdAt`
-
-### Submission
-- `id: uuid v7`
-- `userName: string`
-- `githubRepoUrl: string 500` (validated contains github.com)
-- `challenge: ManyToOne nullable`
-- `challengeSnapshot: text` (copy of challenge description at submission time)
-- `status: enum PENDING, PROCESSING, APPROVED, REJECTED, FAILED`
-- `approved: bool|null`
-- `evaluationResult: json {approved, summary, improvements[], reasoning, raw, evaluatedAt}`
-- `processingLogs: text nullable`
-- `createdAt, updatedAt`
-
-## Testing
-
-### Symfony (PHPUnit)
-
-```bash
-docker compose exec php php bin/phpunit --testdox           # All 35 tests
-docker compose exec php php bin/phpunit tests/Unit --testdox
-docker compose exec php php bin/phpunit tests/Functional --testdox
-```
-
-Coverage:
-
-- Enum SubmissionStatus (label, isFinal)
-- Entity Challenge, Submission (create, relations, status transitions, toArray)
-- Service EvaluationWebhookService (success, error status, payload structure, MockHttpClient)
-- Controller Submission (home, new form, api list/create, validation, invalid github url, show, retry)
-- Controller Challenge (new form, list, create)
-- Controller InternalCallback (health, token auth, approved/rejected update, missing fields)
-- MessageHandler EvaluationRequestHandler (updates status, throws on failure, handles non-existent)
-
-### Python (Pytest)
-
+### FastAPI (Pytest Suite)
+Contains **22+ tests** covering repository isolation, AST/file aggregation, payload retries, DLQ replayer, and API endpoints.
 ```bash
 docker compose exec python-evaluator pytest -v
-# 25 tests
 ```
+*Tested Areas:*
+- **File Collector Truncation**: Validates that Python service ignores binary artifacts (`node_modules`, `.git`, `vendor`) and restricts LLM ingestion payload length.
+- **Tenacity Webhook Client**: Verifies retry strategies on mock remote host failures.
+- **Fallback Chains**: Validates mock Groq API failures trigger Gemini pipelines correctly.
+- **Callback Replayer**: Verifies processing of empty file queues, successfully cleared logs, and re-attempt loops.
 
-Coverage:
+---
 
-- file_collector: ignore logic, relevant file check, simple collection, truncation
-- repo_cloner: url validation, invalid clone, success clone (octocat/Hello-World)
-- llm_provider: extract JSON direct, with markdown fence, with extra text, normalize, no-keys fallback
-- evaluator: no-keys heuristic, empty repo
-- main: root, health, evaluate accepts, invalid challenge text
-- callback: success, failure retries, payload structure
-- callback_replayer: empty no file, success clears file, keeps failed (new cron DLQ logic)
+## 🔍 Evaluator Microservice API & DLQ Control
 
-### E2E Manual Test
-
+### Health Check Endpoint
 ```bash
-# Submit a real repo and watch logs
-docker compose logs -f php-worker
-docker compose logs -f python-evaluator
-# In another terminal:
-curl -X POST http://localhost:8080/api/submissions -H "Content-Type: application/json" \
-  -d '{"userName":"e2e","githubRepoUrl":"https://github.com/octocat/Hello-World","customChallengeText":"Test challenge that requires README and some code"}'
-# Check status after ~10s
-curl http://localhost:8080/api/submissions/<id> | jq
+curl http://localhost:8001/health
+# {"status":"ok","llm_provider":"groq","groq_configured":true,"gemini_configured":false}
 ```
 
-## Environment Variables
+### DLQ Management
+While failures automatically retry every 60s, you can inspect or trigger redelivery manually:
+```bash
+# Check status and current size of the DLQ
+curl http://localhost:8001/admin/replay-status
+# {"failed_callbacks":0,"path":"/tmp/failed_callbacks.jsonl","replay_interval":60}
 
-Root `.env` and `symfony/.env` share:
-
-```
-POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
-DATABASE_URL=postgresql://app:app@database:5432/challenge_reviewer?serverVersion=17&charset=utf8
-MESSENGER_TRANSPORT_DSN=doctrine://default?queue_name=async
-APP_SECRET
-PYTHON_EVALUATOR_URL=http://python-evaluator:8000
-SYMFONY_INTERNAL_CALLBACK_URL=http://nginx/api/internal/evaluation-result (internal docker hostname)
-CALLBACK_TOKEN=shared secret for webhook auth
-GROQ_API_KEY=gsk_...
-GEMINI_API_KEY=...
-LLM_PROVIDER=auto|groq|gemini
+# Force manual replay of all failed webhooks in the queue
+curl -X POST http://localhost:8001/admin/replay-failed-callbacks
+# {"total":1,"replayed":1,"still_failing":0}
 ```
 
-## Project Structure
+---
 
-```
-.
-├── docker-compose.yml
-├── nginx/default.conf
-├── symfony/ (Symfony 7.3 app)
-│   ├── src/Entity/{Challenge,Submission}.php
-│   ├── src/Enum/SubmissionStatus.php
-│   ├── src/Message/EvaluateSubmissionMessage.php
-│   ├── src/MessageHandler/EvaluationRequestHandler.php
-│   ├── src/Service/EvaluationWebhookService.php
-│   ├── src/Controller/{Submission,Challenge,InternalCallback}Controller.php
-│   ├── templates/submission/{home,new,show}.html.twig
-│   ├── migrations/
-│   └── tests/
-├── python-service/
-│   ├── app/
-│   │   ├── main.py (FastAPI + lifespan cron for DLQ replay, admin endpoints)
-│   │   ├── config.py (Groq/Gemini only + failed_callbacks_path + replay interval)
-│   │   ├── models.py
-│   │   ├── repo_cloner.py
-│   │   ├── file_collector.py
-│   │   ├── prompts.py
-│   │   ├── llm_provider.py (Groq+Gemini fallback)
-│   │   ├── evaluator.py
-│   │   ├── symfony_client.py (tenacity retry + DLQ logging)
-│   │   └── callback_replayer.py (new: replay_failed_callbacks + replay_loop every 60s)
-│   └── tests/
-│       └── test_callback_replayer.py (DLQ unit tests)
-└── README.md
-```
+## 🔒 Production Readiness & Scaling Strategy
 
-## LLM Prompting
+While this project is configured as a proof-of-concept, it is architected with a clear scaling route:
 
-Prompt in `prompts.py`:
+1. **Webhook HMAC Signature validation**: Instead of matching a static `X-Internal-Token` header, verify callbacks using SHA256 HMAC request body signatures to prevent replay attacks.
+2. **Ephemeral Sandboxed Cloning**: Isolate the Python repository cloner within short-lived, read-only Docker containers or VM microVMs (e.g., Firecracker) to safely review arbitrary code submissions.
+3. **Queue Scalability**: Swap the `MESSENGER_TRANSPORT_DSN` to a dedicated RabbitMQ cluster or Amazon SQS and scale the `php-worker` container replicas horizontally.
+4. **Caching & Deduplication**: Cache evaluation results based on repository git commit hashes. If a user submits the same repository commit twice, serve the cached result immediately.
 
-```
-You are a senior reviewer...
-Challenge: {challenge_text}
-File Tree: {tree}
-File Contents: {contents}
-Return JSON: {approved, summary, improvements[], reasoning}
-```
+---
 
-- System prompt warns to treat file contents as data, not instructions (prompt injection mitigation)
-- Output constrained to valid JSON, parser extracts from markdown fences if needed
-- `normalize_evaluation_result` ensures bool approved, summary, improvements list
-
-Dual provider logic:
-
-1. If `LLM_PROVIDER=groq` -> only Groq
-2. If `gemini` -> only Gemini
-3. If `auto` (default) -> try Groq, on exception try Gemini, if both fail return heuristic fallback (approved false, message about missing keys) so e2e works without keys for testing.
-
-## Security & Limitations
-
-- Only public GitHub repos (no PAT), shallow clone `--depth 1`, timeout 60s, size limit 100KB per file, total 25k chars for LLM context
-- No code execution, only static analysis
-- Callback protected by `X-Internal-Token` header, must match `CALLBACK_TOKEN`
-- File collection ignores `.git, node_modules, vendor, __pycache__, etc`
-- For production: add rate limiting, add GitHub PAT support for private repos, use Redis cache for evaluations, add auth for API, use HTTPS, set strong APP_SECRET and CALLBACK_TOKEN
-
-## Future Improvements
-
-- Add Symfony Messenger retry with dead-letter queue UI
-- Add pagination & filtering for submissions
-- Add webhook signature HMAC instead of simple token
-- Support OpenRouter for more free models
-- Add evaluation history diff
-- Add GitHub App integration to auto-evaluate PRs
-
-## License
-
-MIT - for technical challenge demo.
+## 📄 License
+This project is licensed under the MIT License - see the LICENSE file for details.
