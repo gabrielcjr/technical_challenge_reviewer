@@ -78,7 +78,7 @@ class EvaluationRequestHandler
             'error' => $error->getMessage(),
         ]);
 
-        $submission->appendProcessingLog('Dispatch failed: ' . $error->getMessage());
+        $submission->markAsFailed('Dispatch failed: ' . $error->getMessage());
         $this->entityManager->flush();
     }
 }

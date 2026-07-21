@@ -131,4 +131,45 @@ class InternalCallbackControllerTest extends WebTestCase
 
         $this->assertResponseStatusCodeSame(400);
     }
+
+    public function testCallbackFailedFlagMarksSubmissionFailed(): void
+    {
+        $client = static::createClient();
+
+        $client->request('POST', '/api/submissions', [], [], [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_ACCEPT' => 'application/json'
+        ], json_encode([
+            'userName' => 'failed_callback_test',
+            'githubRepoUrl' => 'https://github.com/octocat/Hello-World',
+            'customChallengeText' => 'Challenge for failed callback test - long enough.'
+        ]));
+
+        $this->assertResponseStatusCodeSame(201);
+        $submissionId = json_decode($client->getResponse()->getContent(), true)['id'];
+
+        $token = $_ENV['CALLBACK_TOKEN'] ?? $_SERVER['CALLBACK_TOKEN'] ?? 's3cr3t_shared_token_change_me';
+
+        $client->request('POST', '/api/internal/evaluation-result', [], [], [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_X-INTERNAL-TOKEN' => $token
+        ], json_encode([
+            'submissionId' => $submissionId,
+            'approved' => false,
+            'failed' => true,
+            'summary' => 'Evaluation failed: clone error',
+            'improvements' => ['Check repository URL is valid and public'],
+            'reasoning' => 'git clone failed'
+        ]));
+
+        $this->assertResponseIsSuccessful();
+        $responseData = json_decode($client->getResponse()->getContent(), true);
+        $this->assertEquals('failed', $responseData['submissionStatus']);
+
+        $client->request('GET', "/api/submissions/{$submissionId}");
+        $data = json_decode($client->getResponse()->getContent(), true);
+        $this->assertEquals('failed', $data['status']);
+        $this->assertFalse($data['approved']);
+        $this->assertEquals('Evaluation failed: clone error', $data['evaluation']['summary']);
+    }
 }

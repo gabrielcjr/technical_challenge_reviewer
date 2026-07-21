@@ -88,4 +88,45 @@ class SubmissionTest extends TestCase
         $this->assertArrayHasKey('status', $array);
         $this->assertEquals('bob', $array['userName']);
     }
+
+    public function testMarkAsFailed(): void
+    {
+        $submission = new Submission();
+        $submission->markAsFailed('Dispatch timeout');
+
+        $this->assertEquals(SubmissionStatus::FAILED, $submission->getStatus());
+        $this->assertFalse($submission->isApproved());
+        $this->assertTrue($submission->canBeRetried());
+        $this->assertStringContainsString('Dispatch timeout', (string) $submission->getProcessingLogs());
+    }
+
+    public function testApplyEvaluationResultFailedFlag(): void
+    {
+        $submission = new Submission();
+        $submission->applyEvaluationResult([
+            'approved' => false,
+            'summary' => 'Clone failed',
+            'improvements' => [],
+            'reasoning' => 'git error',
+        ], false, true);
+
+        $this->assertEquals(SubmissionStatus::FAILED, $submission->getStatus());
+        $this->assertFalse($submission->isApproved());
+        $this->assertTrue($submission->canBeRetried());
+    }
+
+    public function testCanBeRetriedDelegatesToStatus(): void
+    {
+        $submission = new Submission();
+        $this->assertTrue($submission->canBeRetried());
+
+        $submission->setStatus(SubmissionStatus::APPROVED);
+        $this->assertFalse($submission->canBeRetried());
+
+        $submission->setStatus(SubmissionStatus::REJECTED);
+        $this->assertFalse($submission->canBeRetried());
+
+        $submission->setStatus(SubmissionStatus::FAILED);
+        $this->assertTrue($submission->canBeRetried());
+    }
 }

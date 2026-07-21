@@ -11,6 +11,7 @@ final class EvaluationCallbackPayload
         public readonly array $improvements,
         public readonly string $reasoning,
         public readonly ?string $rawOutput,
+        public readonly bool $failed = false,
     ) {
     }
 
@@ -22,21 +23,37 @@ final class EvaluationCallbackPayload
         $improvements = $data['improvements'] ?? [];
         $reasoning = $data['reasoning'] ?? $data['details'] ?? '';
         $rawOutput = $data['rawOutput'] ?? $data['raw'] ?? null;
+        $failed = $data['failed'] ?? false;
 
         if ($submissionId === '') {
             throw new \InvalidArgumentException('submissionId required');
         }
-        if ($approved === null) {
+        if ($approved === null && !$failed) {
             throw new \InvalidArgumentException('approved field required');
         }
 
-        $approvedBool = filter_var($approved, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-        if ($approvedBool === null) {
-            $approvedBool = (bool) $approved;
+        $approvedBool = false;
+        if ($approved !== null) {
+            $approvedBool = filter_var($approved, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($approvedBool === null) {
+                $approvedBool = (bool) $approved;
+            }
+        }
+
+        $failedBool = filter_var($failed, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($failedBool === null) {
+            $failedBool = (bool) $failed;
+        }
+
+        // Infrastructure/process failures are never approvals.
+        if ($failedBool) {
+            $approvedBool = false;
         }
 
         if ($summary === '') {
-            $summary = $approvedBool ? 'Challenge approved' : 'Challenge not approved';
+            $summary = $failedBool
+                ? 'Evaluation failed'
+                : ($approvedBool ? 'Challenge approved' : 'Challenge not approved');
         }
 
         return new self(
@@ -46,6 +63,7 @@ final class EvaluationCallbackPayload
             is_array($improvements) ? $improvements : [],
             (string) $reasoning,
             $rawOutput !== null ? (string) $rawOutput : null,
+            $failedBool,
         );
     }
 }

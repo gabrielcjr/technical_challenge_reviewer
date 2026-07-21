@@ -30,4 +30,13 @@ class SubmissionStatusTest extends TestCase
         $this->assertEquals('pending', SubmissionStatus::PENDING->value);
         $this->assertEquals('approved', SubmissionStatus::APPROVED->value);
     }
+
+    public function testCanBeRetried(): void
+    {
+        $this->assertTrue(SubmissionStatus::PENDING->canBeRetried());
+        $this->assertTrue(SubmissionStatus::PROCESSING->canBeRetried());
+        $this->assertTrue(SubmissionStatus::FAILED->canBeRetried());
+        $this->assertFalse(SubmissionStatus::APPROVED->canBeRetried());
+        $this->assertFalse(SubmissionStatus::REJECTED->canBeRetried());
+    }
 }

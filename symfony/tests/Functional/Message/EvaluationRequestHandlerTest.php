@@ -109,16 +109,22 @@ class EvaluationRequestHandlerTest extends KernelTestCase
 
         $message = new EvaluateSubmissionMessage($id);
 
-        $this->expectException(\RuntimeException::class);
-        $handler->__invoke($message);
+        try {
+            $handler->__invoke($message);
+            $this->fail('Expected RuntimeException on HTTP failure');
+        } catch (\RuntimeException) {
+            // expected — messenger will retry; submission marked FAILED
+        }
+
+        $em->clear();
+        $updated = $repo->find($id);
+        $this->assertNotNull($updated);
+        $this->assertEquals('failed', $updated->getStatus()->value);
+        $this->assertTrue($updated->canBeRetried());
 
         // Cleanup
-        $em->clear();
-        $toDelete = $repo->find($id);
-        if ($toDelete) {
-            $em->remove($toDelete);
-            $em->flush();
-        }
+        $em->remove($updated);
+        $em->flush();
     }
 
     public function testHandlerHandlesNonExistentSubmission(): void

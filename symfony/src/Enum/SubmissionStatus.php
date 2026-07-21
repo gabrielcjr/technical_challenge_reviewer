@@ -31,6 +31,11 @@ enum SubmissionStatus: string
 
     public function canBeRetried(): bool
     {
-        return $this === self::FAILED;
+        // Non-final states and infrastructure failures can be re-queued.
+        // APPROVED / REJECTED are terminal evaluation outcomes.
+        return match ($this) {
+            self::PENDING, self::PROCESSING, self::FAILED => true,
+            self::APPROVED, self::REJECTED => false,
+        };
     }
 }

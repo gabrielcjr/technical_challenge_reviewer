@@ -75,18 +75,25 @@ class InternalCallbackController extends AbstractController
         }
 
         $evaluationResult = $this->buildEvaluationResult($callbackData);
-        $submission->applyEvaluationResult($evaluationResult, $callbackData->approved);
+        $submission->applyEvaluationResult(
+            $evaluationResult,
+            $callbackData->approved,
+            $callbackData->failed,
+        );
         $this->entityManager->flush();
 
         $this->logger->info('Submission evaluated', [
             'id' => $callbackData->submissionId,
             'approved' => $callbackData->approved,
+            'failed' => $callbackData->failed,
+            'status' => $submission->getStatus()->value,
         ]);
 
         return $this->json([
             'status' => 'ok',
             'id' => $callbackData->submissionId,
             'approved' => $callbackData->approved,
+            'submissionStatus' => $submission->getStatus()->value,
         ]);
     }
 
