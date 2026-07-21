@@ -7,7 +7,6 @@ use App\Enum\SubmissionStatus;
 use App\Message\EvaluateSubmissionMessage;
 use App\Repository\ChallengeRepository;
 use App\Repository\SubmissionRepository;
-use App\Service\EvaluationConfig;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;

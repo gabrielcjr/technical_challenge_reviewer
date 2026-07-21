@@ -11,7 +11,11 @@ final class CallbackAuthenticationException extends \RuntimeException
 
 final class CallbackAuthenticator
 {
-    private const DEFAULT_INSECURE_TOKEN = 'change_me';
+    /** Empty or obvious placeholder only — real shared secrets always enforce auth. */
+    private const INSECURE_PLACEHOLDER_TOKENS = [
+        '',
+        'change_me',
+    ];
 
     public function __construct(
         private readonly string $expectedToken,
@@ -54,7 +58,7 @@ final class CallbackAuthenticator
 
     public function authenticate(?string $providedToken): void
     {
-        if ($this->expectedToken === '' || $this->expectedToken === self::DEFAULT_INSECURE_TOKEN) {
+        if (in_array($this->expectedToken, self::INSECURE_PLACEHOLDER_TOKENS, true)) {
             $this->logger->warning('Callback token not secured - using default insecure token');
             return;
         }

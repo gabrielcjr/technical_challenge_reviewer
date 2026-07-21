@@ -216,13 +216,24 @@ class Submission
     public function markAsFailed(string $reason): void
     {
         $this->status = SubmissionStatus::FAILED;
+        $this->approved = false;
         $this->appendProcessingLog('Marked as FAILED: ' . $reason);
     }
 
-    public function applyEvaluationResult(array $evaluationResult, bool $approved): void
+    public function applyEvaluationResult(array $evaluationResult, bool $approved, bool $failed = false): void
     {
         $this->evaluationResult = $evaluationResult;
         $this->approved = $approved;
+
+        if ($failed) {
+            $this->status = SubmissionStatus::FAILED;
+            $this->approved = false;
+            $this->appendProcessingLog(
+                sprintf('Evaluation failed (infrastructure/process error): status=%s', $this->status->value)
+            );
+            return;
+        }
+
         $this->status = $approved ? SubmissionStatus::APPROVED : SubmissionStatus::REJECTED;
         $this->appendProcessingLog(
             sprintf('Evaluation applied: approved=%s, status=%s', $approved ? 'true' : 'false', $this->status->value)
@@ -231,9 +242,7 @@ class Submission
 
     public function canBeRetried(): bool
     {
-        // Retry allowed for failed submissions, or any non-final state (pending, processing)
-        // This matches controller logic: not final OR failed
-        return !$this->isFinal() || $this->status === SubmissionStatus::FAILED;
+        return $this->status->canBeRetried();
     }
 
     public function isFinal(): bool

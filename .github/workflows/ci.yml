@@ -51,13 +51,11 @@ jobs:
           SYMFONY_APP_URL=http://localhost:8080
           PYTHON_EVALUATOR_URL=http://python-evaluator:8000
           CALLBACK_TOKEN=s3cr3t_shared_token_change_me
-          CALLBACK_TOKEN_SHARED=s3cr3t_shared_token_change_me
           EVALUATOR_PORT=8001
           GROQ_API_KEY=dummy_key_for_ci
           GEMINI_API_KEY=dummy_key_for_ci
           LLM_PROVIDER=auto
           SYMFONY_CALLBACK_URL=http://nginx/api/internal/evaluation-result
-          SYMFONY_INTERNAL_CALLBACK_URL=http://nginx/api/internal/evaluation-result
           COMPOSER_ALLOW_SUPERUSER=1
           EOF
           cat .env

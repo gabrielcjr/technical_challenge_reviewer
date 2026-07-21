@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 
-from .config import settings, SENTINEL_TEST_TOKENS
+from .config import settings
 from .models import EvaluateRequest, HealthResponse
 from .repo_cloner import cloned_repo, validate_github_url
 from .evaluator import evaluate_repository
@@ -18,7 +18,8 @@ from .callback_replayer import (
 )
 
 # --- Constants ---
-MIN_CHALLENGE_TEXT_LENGTH = 10
+# Keep aligned with Symfony Submission challengeSnapshot min length (20).
+MIN_CHALLENGE_TEXT_LENGTH = 20
 RAW_OUTPUT_TRUNCATION_LENGTH = 2000
 ERROR_SUMMARY_TRUNCATION_LENGTH = 200
 ERROR_REASONING_TRUNCATION_LENGTH = 1000
@@ -164,6 +165,7 @@ def _send_success_callback(task: EvaluationTask, result: dict, metadata: dict) -
 
 
 def _send_failure_callback(task: EvaluationTask, error: Exception) -> None:
+    # failed=True marks infrastructure/process errors as FAILED (not REJECTED).
     failure_callback = EvaluationCallback(
         submission_id=task.submission_id,
         approved=False,
@@ -175,6 +177,7 @@ def _send_failure_callback(task: EvaluationTask, error: Exception) -> None:
         ],
         reasoning=str(error),
         raw_output=str(error)[:ERROR_REASONING_TRUNCATION_LENGTH],
+        failed=True,
     )
     try:
         send_evaluation_callback(task.callback_url, task.callback_token, failure_callback)

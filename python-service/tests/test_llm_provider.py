@@ -56,3 +56,25 @@ def test_evaluate_with_no_keys(monkeypatch):
     assert provider == "fallback:no-keys"
     assert result["approved"] is False
     assert "LLM keys not configured" in result["summary"]
+
+
+def test_evaluate_with_providers_failed_uses_heuristic(monkeypatch):
+    """When keys look configured but providers fail, use heuristic fallback (no crash)."""
+    import app.config as config_module
+    import app.llm_provider as llm_module
+
+    monkeypatch.setattr(config_module.settings, "groq_api_key", "gsk_real_looking_key")
+    monkeypatch.setattr(config_module.settings, "gemini_api_key", "real_gemini_key")
+    monkeypatch.setattr(config_module.settings, "llm_provider", "auto")
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(llm_module, "get_groq_llm", boom)
+    monkeypatch.setattr(llm_module, "get_gemini_llm", boom)
+
+    result, provider = llm_module.evaluate_with_llm("Test challenge")
+
+    assert result["approved"] is False
+    assert provider == "fallback:providers-failed"
+    assert "providers failed" in result["summary"].lower() or "heuristic" in result["summary"].lower()

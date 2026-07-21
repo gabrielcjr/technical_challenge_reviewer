@@ -35,7 +35,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://app:app@database:5432/challenge_reviewer?serverVersion=17&charset=utf8
+      DATABASE_URL: ${DATABASE_URL}
     networks:
       - app-network
 
@@ -69,7 +69,8 @@ services:
       GROQ_API_KEY: ${GROQ_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       LLM_PROVIDER: ${LLM_PROVIDER:-auto}
-      SYMFONY_CALLBACK_URL: ${SYMFONY_INTERNAL_CALLBACK_URL:-http://nginx/api/internal/evaluation-result}
+      # Python settings field is symfony_callback_url (env: SYMFONY_CALLBACK_URL)
+      SYMFONY_CALLBACK_URL: ${SYMFONY_CALLBACK_URL:-http://nginx/api/internal/evaluation-result}
       CALLBACK_TOKEN: ${CALLBACK_TOKEN}
       PYTHONUNBUFFERED: 1
     depends_on:
@@ -93,9 +94,9 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://app:app@database:5432/challenge_reviewer?serverVersion=17&charset=utf8
+      DATABASE_URL: ${DATABASE_URL}
       MESSENGER_TRANSPORT_DSN: ${MESSENGER_TRANSPORT_DSN}
-    command: ["sh", "-c", "until php bin/console doctrine:query:sql 'SELECT 1' >/dev/null 2>&1; do echo 'Waiting for database...'; sleep 2; done && php bin/console messenger:consume async --time-limit=3600 --sleep=1 -vv"]
+    command: ["sh", "-c", "until php bin/console dbal:run-sql 'SELECT 1' >/dev/null 2>&1; do echo 'Waiting for database...'; sleep 2; done && php bin/console messenger:consume async --time-limit=3600 --sleep=1 -vv"]
     networks:
       - app-network
 

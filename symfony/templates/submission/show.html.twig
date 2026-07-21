@@ -42,9 +42,17 @@
             <div id="evaluationSection">
                 {% if submission.evaluationResult %}
                     <h3 class="text-sm font-medium text-gray-700 mt-4">Evaluation Result</h3>
-                    <div class="mt-2 p-4 rounded border {% if submission.approved %}border-green-200 bg-green-50{% else %}border-red-200 bg-red-50{% endif %}">
-                        <p class="font-semibold {% if submission.approved %}text-green-800{% else %}text-red-800{% endif %}">
-                            {% if submission.approved %}✅ Approved{% else %}❌ Not Approved{% endif %}
+                    <div class="mt-2 p-4 rounded border
+                        {% if submission.status.value == 'failed' %}border-gray-200 bg-gray-50
+                        {% elseif submission.approved %}border-green-200 bg-green-50
+                        {% else %}border-red-200 bg-red-50{% endif %}">
+                        <p class="font-semibold
+                            {% if submission.status.value == 'failed' %}text-gray-800
+                            {% elseif submission.approved %}text-green-800
+                            {% else %}text-red-800{% endif %}">
+                            {% if submission.status.value == 'failed' %}⚠ Evaluation Failed
+                            {% elseif submission.approved %}✅ Approved
+                            {% else %}❌ Not Approved{% endif %}
                         </p>
                         <p class="mt-2 text-sm text-gray-800">{{ submission.evaluationResult.summary ?? '' }}</p>
 
@@ -97,6 +105,7 @@
         </div>
     </div>
 </div>
+{% endblock %}
 
 {% block javascripts %}
 <script>
@@ -127,7 +136,7 @@ async function fetchStatus() {
             document.getElementById('pollingText') ? document.getElementById('pollingText').textContent = 'Evaluation completed!' : null;
 
             // Reload to show evaluation result nicely rendered server side
-            if (data.evaluation) {
+            if (data.evaluation || data.status === 'failed') {
                 window.location.reload();
             }
         } else {
@@ -157,5 +166,4 @@ document.getElementById('retryBtn').addEventListener('click', async () => {
     }
 });
 </script>
-{% endblock %}
 {% endblock %}
