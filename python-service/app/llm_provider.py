@@ -226,23 +226,51 @@ def _evaluate_with_single_provider(provider: str, prompt: str) -> Tuple[Dict[str
 
 def _handle_all_providers_failed() -> Tuple[Dict[str, Any], str]:
     last_error = getattr(_try_providers_in_sequence, "last_error", None)
-    logger.error(f"All LLM providers failed, last error: {last_error}. Returning fallback.")
+    logger.error(f"All LLM providers failed, last error: {last_error}. Returning heuristic fallback.")
 
     if not settings.is_groq_configured() and not settings.is_gemini_configured():
         logger.warning("No LLM keys configured, using heuristic fallback evaluation")
-        return _build_no_keys_fallback_result(last_error)
+        return _build_heuristic_fallback_result(last_error, reason="no-keys")
 
-    raise RuntimeError(f"All LLM providers failed. Last error: {last_error}")
+    # Keys configured but all providers failed — keep the queue unblocked with a
+    # deterministic fallback instead of crashing the evaluation pipeline.
+    logger.warning("All configured LLM providers failed, using heuristic fallback evaluation")
+    return _build_heuristic_fallback_result(last_error, reason="providers-failed")
 
 
-def _build_no_keys_fallback_result(last_error: Exception | None) -> Tuple[Dict[str, Any], str]:
-    return {
-        "approved": False,
-        "summary": "LLM keys not configured - evaluation skipped. Configure GROQ_API_KEY or GEMINI_API_KEY for real AI evaluation.",
-        "improvements": [
+def _build_heuristic_fallback_result(
+    last_error: Exception | None,
+    reason: str,
+) -> Tuple[Dict[str, Any], str]:
+    if reason == "no-keys":
+        summary = (
+            "LLM keys not configured - evaluation skipped. "
+            "Configure GROQ_API_KEY or GEMINI_API_KEY for real AI evaluation."
+        )
+        improvements = [
             "Configure GROQ_API_KEY (Groq, free) or GEMINI_API_KEY in .env to enable AI evaluation",
             "Once keys are set, re-run evaluation via retry button",
-        ],
-        "reasoning": f"No LLM provider available. Last error: {last_error}. Set API keys to enable evaluation.",
-        "raw": {"error": str(last_error)},
-    }, "fallback:no-keys"
+        ]
+        reasoning = (
+            f"No LLM provider available. Last error: {last_error}. "
+            "Set API keys to enable evaluation."
+        )
+    else:
+        summary = (
+            "All LLM providers failed - evaluation used heuristic fallback. "
+            "Retry later or check API keys / rate limits."
+        )
+        improvements = [
+            "Verify GROQ_API_KEY / GEMINI_API_KEY are valid and not rate-limited",
+            "Retry evaluation once providers are healthy",
+            "Check python-evaluator logs for provider error details",
+        ]
+        reasoning = f"All LLM providers failed. Last error: {last_error}."
+
+    return {
+        "approved": False,
+        "summary": summary,
+        "improvements": improvements,
+        "reasoning": reasoning,
+        "raw": {"error": str(last_error), "fallback_reason": reason},
+    }, f"fallback:{reason}"

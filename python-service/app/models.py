@@ -34,6 +34,9 @@ class CallbackPayload(BaseModel):
     reasoning: Optional[str] = None
     raw_output: Optional[str] = Field(default=None, alias="rawOutput")
     callback_token: Optional[str] = Field(default=None, alias="callbackToken")
+    # True for infrastructure/process errors (clone failure, LLM outage, etc.)
+    # False for normal evaluation outcomes (approved / rejected).
+    failed: bool = False
 
     def to_symfony_dict(self) -> dict:
         return self.model_dump(by_alias=True)

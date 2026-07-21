@@ -31,6 +31,7 @@ class EvaluationCallback:
     improvements: list
     reasoning: str | None = None
     raw_output: str | None = None
+    failed: bool = False
 
     def to_payload(self, token: str) -> dict:
         payload = CallbackPayload(
@@ -41,6 +42,7 @@ class EvaluationCallback:
             reasoning=self.reasoning,
             rawOutput=self.raw_output,
             callbackToken=token,
+            failed=self.failed,
         )
         return payload.to_symfony_dict()
 
@@ -119,6 +121,7 @@ def send_callback(
     improvements: list,
     reasoning: str | None = None,
     raw_output: str | None = None,
+    failed: bool = False,
 ) -> bool:
     """
     Backward compatible wrapper - delegates to send_evaluation_callback.
@@ -130,6 +133,7 @@ def send_callback(
         improvements=improvements,
         reasoning=reasoning,
         raw_output=raw_output,
+        failed=failed,
     )
     return send_evaluation_callback(callback_url, callback_token, evaluation_callback)
 
