@@ -45,7 +45,8 @@ migrations-diff:
 	docker compose exec php php bin/console doctrine:migrations:diff
 
 fixtures:
-	docker compose exec php php bin/console doctrine:fixtures:load --no-interaction --group=dev || echo "No fixtures"
+	@echo "No Doctrine fixtures are defined in this project."
+	@echo "Create challenges via the UI: http://localhost:$${SYMFONY_PORT:-8080}/challenges/new"
 
 worker-logs:
 	docker compose logs -f php-worker
