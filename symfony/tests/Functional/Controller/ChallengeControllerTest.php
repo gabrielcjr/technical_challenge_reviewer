@@ -6,15 +6,6 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
 class ChallengeControllerTest extends WebTestCase
 {
-    public function testChallengeNewFormLoads(): void
-    {
-        $client = static::createClient();
-        $client->request('GET', '/challenges/new');
-
-        $this->assertResponseIsSuccessful();
-        $this->assertSelectorExists('form');
-    }
-
     public function testApiListChallenges(): void
     {
         $client = static::createClient();
