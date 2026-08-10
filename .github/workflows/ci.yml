@@ -101,7 +101,9 @@ jobs:
 
       - name: Install React dependencies
         working-directory: ./react-frontend
-        run: npm install
+        run: |
+          sudo chown -R $USER:$USER .
+          npm install
 
       - name: Run React Unit tests
         working-directory: ./react-frontend
