@@ -100,7 +100,19 @@ services:
     networks:
       - app-network
 
-
+  frontend:
+    build:
+      context: ./react-frontend
+      dockerfile: Dockerfile
+    container_name: challenge_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./react-frontend:/app
+      - /app/node_modules
+    networks:
+      - app-network
 
 networks:
   app-network:
