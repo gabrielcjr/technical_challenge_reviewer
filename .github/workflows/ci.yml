@@ -71,12 +71,12 @@ jobs:
           docker compose ps
           docker compose logs database
 
-      - name: Start PHP and Python services
+      - name: Start all services
         run: |
-          docker compose up -d php nginx python-evaluator php-worker
+          docker compose up -d php nginx python-evaluator php-worker frontend
           docker compose ps
           # Give services a moment to initialize
-          sleep 5
+          sleep 10
 
       - name: Install Symfony dependencies (inside container)
         run: |
