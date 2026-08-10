@@ -5,16 +5,10 @@ on:
     branches:
       - master
       - main
-    # Runs when:
-    # - opened: PR is created against master/main
-    # - synchronize: new push to the PR branch (each commit)
-    # - reopened, ready_for_review, etc.
   push:
-    branches-ignore:
+    branches:
       - master
       - main
-    # Ensures CI also runs on every push to a feature branch,
-    # even before PR is marked ready, covering pushes against opened PRs
 
 # Cancel previous runs if new commit pushed to same PR
 concurrency:
@@ -71,12 +65,12 @@ jobs:
           docker compose ps
           docker compose logs database
 
-      - name: Start PHP and Python services
+      - name: Start all services
         run: |
-          docker compose up -d php nginx python-evaluator php-worker
+          docker compose up -d php nginx python-evaluator php-worker frontend
           docker compose ps
           # Give services a moment to initialize
-          sleep 5
+          sleep 10
 
       - name: Install Symfony dependencies (inside container)
         run: |
@@ -99,6 +93,29 @@ jobs:
         run: |
           docker compose exec -T python-evaluator pytest -v --color=yes
           docker compose exec -T python-evaluator python -m py_compile app/*.py || true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install React dependencies
+        working-directory: ./react-frontend
+        run: |
+          sudo chown -R $USER:$USER .
+          npm install
+
+      - name: Run React Unit tests
+        working-directory: ./react-frontend
+        run: npm run test -- --run
+
+      - name: Install Playwright Browsers
+        working-directory: ./react-frontend
+        run: npx playwright install chromium --with-deps
+
+      - name: Run Playwright E2E tests
+        working-directory: ./react-frontend
+        run: npm run test:e2e
 
       - name: Verify services health
         if: always()

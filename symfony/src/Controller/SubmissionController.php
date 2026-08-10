@@ -18,7 +18,6 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 class SubmissionController extends AbstractController
 {
-    private const HOME_RECENT_LIMIT = 20;
     private const API_RECENT_LIMIT = 50;
     private const GITHUB_DOMAIN = 'github.com';
 
@@ -31,41 +30,7 @@ class SubmissionController extends AbstractController
     ) {
     }
 
-    #[Route('/', name: 'home', methods: ['GET'])]
-    public function home(): Response
-    {
-        $challenges = $this->challengeRepository->findBy([], ['createdAt' => 'DESC']);
-        $submissions = $this->submissionRepository->findRecent(self::HOME_RECENT_LIMIT);
 
-        return $this->render('submission/home.html.twig', [
-            'challenges' => $challenges,
-            'submissions' => $submissions,
-        ]);
-    }
-
-    #[Route('/submissions/new', name: 'submission_new', methods: ['GET'])]
-    public function newForm(): Response
-    {
-        $challenges = $this->challengeRepository->findBy([], ['createdAt' => 'DESC']);
-
-        return $this->render('submission/new.html.twig', [
-            'challenges' => $challenges,
-        ]);
-    }
-
-    #[Route('/submissions/{id}', name: 'submission_show', methods: ['GET'])]
-    public function show(string $id): Response
-    {
-        $submission = $this->submissionRepository->find($id);
-
-        if (!$submission) {
-            throw $this->createNotFoundException('Submission not found');
-        }
-
-        return $this->render('submission/show.html.twig', [
-            'submission' => $submission,
-        ]);
-    }
 
     #[Route('/api/submissions', name: 'api_submission_list', methods: ['GET'])]
     public function apiList(): JsonResponse
@@ -154,12 +119,7 @@ class SubmissionController extends AbstractController
 
     private function handleMissingFields(Request $request): Response
     {
-        if ($this->isJsonRequest($request)) {
-            return $this->json(['error' => 'userName and githubRepoUrl are required'], 400);
-        }
-
-        $this->addFlash('error', 'userName and githubRepoUrl are required');
-        return $this->redirectToRoute('submission_new');
+        return $this->json(['error' => 'userName and githubRepoUrl are required'], 400);
     }
 
     private function createAndPersistSubmission(Request $request, array $fields): Response
@@ -226,23 +186,12 @@ class SubmissionController extends AbstractController
             $errorMessages[$error->getPropertyPath()] = $error->getMessage();
         }
 
-        if ($this->isJsonRequest($request)) {
-            return $this->json(['errors' => $errorMessages], 400);
-        }
-
-        $this->addFlash('error', 'Validation failed: ' . implode(', ', $errorMessages));
-        return $this->redirectToRoute('submission_new');
+        return $this->json(['errors' => $errorMessages], 400);
     }
 
     private function handleInvalidGithubUrl(Request $request): Response
     {
-        $message = 'Repository URL must be a github.com URL';
-        if ($this->isJsonRequest($request)) {
-            return $this->json(['error' => $message], 400);
-        }
-
-        $this->addFlash('error', $message);
-        return $this->redirectToRoute('submission_new');
+        return $this->json(['error' => 'Repository URL must be a github.com URL'], 400);
     }
 
     private function isGithubUrlValid(string $url): bool
@@ -254,37 +203,12 @@ class SubmissionController extends AbstractController
     {
         $submissionId = $submission->getIdAsString();
 
-        if ($this->isJsonRequest($request)) {
-            return $this->json([
-                'id' => $submissionId,
-                'status' => $submission->getStatus()->value,
-                'checkUrl' => $this->generateUrl('api_submission_get', ['id' => $submissionId]),
-                'webUrl' => $this->generateUrl('submission_show', ['id' => $submissionId]),
-            ], 201);
-        }
-
-        if ($request->request->count() > 0) {
-            $this->addFlash('success', 'Submission created! Evaluation is pending.');
-            return $this->redirectToRoute('submission_show', ['id' => $submissionId]);
-        }
-
         return $this->json([
             'id' => $submissionId,
             'status' => $submission->getStatus()->value,
             'checkUrl' => $this->generateUrl('api_submission_get', ['id' => $submissionId]),
         ], 201);
     }
-
-    private function isJsonRequest(Request $request): bool
-    {
-        $contentType = $request->headers->get('Content-Type', '');
-        $accept = $request->headers->get('Accept', '');
-
-        return str_contains($contentType, 'application/json')
-            || str_contains($accept, 'application/json')
-            || $request->getContentTypeFormat() === 'json';
-    }
-
     private function isRetryAllowed(Submission $submission): bool
     {
         return $submission->canBeRetried();

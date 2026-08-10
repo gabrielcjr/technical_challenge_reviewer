@@ -58,39 +58,7 @@ class ChallengeController extends AbstractController
         ], 201);
     }
 
-    #[Route('/challenges/new', name: 'challenge_new_form', methods: ['GET'])]
-    public function newForm(): Response
-    {
-        return $this->render('challenge/new.html.twig');
-    }
 
-    #[Route('/challenges', name: 'challenge_create_form', methods: ['POST'])]
-    public function createFromForm(Request $request): Response
-    {
-        $title = $request->request->get('title');
-        $description = $request->request->get('description');
-
-        if (!is_string($title) || !is_string($description)) {
-            $this->addFlash('error', 'Title and description are required');
-            return $this->redirectToRoute('challenge_new_form');
-        }
-
-        $challenge = $this->createChallenge($title, $description);
-
-        $errors = $this->validator->validate($challenge);
-        if (count($errors) > 0) {
-            foreach ($errors as $error) {
-                $this->addFlash('error', $error->getPropertyPath() . ': ' . $error->getMessage());
-            }
-            return $this->redirectToRoute('challenge_new_form');
-        }
-
-        $this->entityManager->persist($challenge);
-        $this->entityManager->flush();
-
-        $this->addFlash('success', 'Challenge created!');
-        return $this->redirectToRoute('home');
-    }
 
     private function serializeChallenge(Challenge $challenge): array
     {

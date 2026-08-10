@@ -8,24 +8,6 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
 class SubmissionControllerTest extends WebTestCase
 {
-    public function testHomePageLoads(): void
-    {
-        $client = static::createClient();
-        $client->request('GET', '/');
-
-        $this->assertResponseIsSuccessful();
-        $this->assertSelectorTextContains('h1', 'Recent Submissions');
-    }
-
-    public function testNewSubmissionFormLoads(): void
-    {
-        $client = static::createClient();
-        $client->request('GET', '/submissions/new');
-
-        $this->assertResponseIsSuccessful();
-        $this->assertSelectorExists('form#submissionForm');
-    }
-
     public function testApiListSubmissions(): void
     {
         $client = static::createClient();
@@ -119,28 +101,6 @@ class SubmissionControllerTest extends WebTestCase
 
         // Our controller checks for github.com presence
         $this->assertResponseStatusCodeSame(400);
-    }
-
-    public function testSubmissionShowPage(): void
-    {
-        $client = static::createClient();
-
-        // Create submission first
-        $client->request('POST', '/api/submissions', [], [], [
-            'CONTENT_TYPE' => 'application/json',
-            'HTTP_ACCEPT' => 'application/json'
-        ], json_encode([
-            'userName' => 'show_page_user',
-            'githubRepoUrl' => 'https://github.com/octocat/Hello-World',
-            'customChallengeText' => 'Test challenge for show page - must be long enough.'
-        ]));
-
-        $this->assertResponseStatusCodeSame(201);
-        $data = json_decode($client->getResponse()->getContent(), true);
-        $id = $data['id'];
-
-        $client->request('GET', "/submissions/{$id}");
-        $this->assertResponseIsSuccessful();
     }
 
     public function testApiGetNonExistentSubmission(): void

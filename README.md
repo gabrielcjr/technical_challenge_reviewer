@@ -1,5 +1,7 @@
 # 🚀 Technical Challenge Reviewer
 
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-6.0-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
 [![Symfony 7.3](https://img.shields.io/badge/Symfony-7.3-black?style=for-the-badge&logo=symfony&logoColor=white)](https://symfony.com/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Docker](https://img.shields.io/badge/Docker_Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
@@ -13,9 +15,10 @@ A distributed asynchronous system that ingests GitHub repository submissions and
 
 ## 🏗️ System Architecture & Workflow
 
-The application is split into two primary services behind an **Nginx** reverse proxy:
-1. **Symfony Portal (PHP 8.4)**: Challenge definition, submission intake (candidate name + repo URL), persistent database state, status page polling, and asynchronous message dispatching.
-2. **Evaluator Microservice (Python 3.12)**: A FastAPI service that clones repositories, collects source files, calls LangChain-based LLM APIs, and reports results via authenticated webhooks.
+The application is split into three primary services behind an **Nginx** reverse proxy:
+1. **React SPA Frontend**: A modern client-side application built with Vite and Tailwind CSS v4.
+2. **Symfony API (PHP 8.4)**: A pure JSON REST API for challenge definition, submission intake, persistent database state, and asynchronous message dispatching.
+3. **Evaluator Microservice (Python 3.12)**: A FastAPI service that clones repositories, collects source files, calls LangChain-based LLM APIs, and reports results via authenticated webhooks.
 
 ```mermaid
 sequenceDiagram
@@ -30,7 +33,7 @@ sequenceDiagram
     User->>Portal: Submit Github URL + Challenge Description
     Note over Portal: Persists submission as PENDING<br/>and generates UUID v7
     Portal->>Queue: Dispatch EvaluateSubmissionMessage
-    Portal-->>User: Render Twig polling status page
+    Portal-->>User: Return HTTP 201 (Submission ID)
 
     loop Consume Queue
         Worker->>Queue: Fetch pending message
@@ -90,8 +93,13 @@ sequenceDiagram
 
 ## 🧑‍💻 Codebase Directory & Key Logic Map
 
-### Symfony Portal (`symfony/src/`)
-*   [ChallengeController.php](symfony/src/Controller/ChallengeController.php) / [SubmissionController.php](symfony/src/Controller/SubmissionController.php) — Frontend entry points and submission orchestration.
+### React Frontend (`react-frontend/`)
+* Built with **Vite**, **React 19**, and **Tailwind CSS v4**.
+* Configured with **Vitest** for component testing and **Playwright** for End-to-End (E2E) UI testing.
+* Provides real-time polling to display evaluation feedback asynchronously.
+
+### Symfony API (`symfony/src/`)
+*   [ChallengeController.php](symfony/src/Controller/ChallengeController.php) / [SubmissionController.php](symfony/src/Controller/SubmissionController.php) — Pure JSON REST API endpoints for the React client.
 *   [InternalCallbackController.php](symfony/src/Controller/InternalCallbackController.php) — Secures evaluation callbacks with token-based auth.
 *   [EvaluateSubmissionMessage.php](symfony/src/Message/EvaluateSubmissionMessage.php) — Serializable message payload for the worker.
 *   [EvaluationRequestHandler.php](symfony/src/MessageHandler/EvaluationRequestHandler.php) — Consumes queue events and POSTs to the FastAPI evaluator; marks `FAILED` on dispatch errors.
@@ -111,7 +119,8 @@ sequenceDiagram
 
 | Layer | Technology | Key Patterns / Features |
 | :--- | :--- | :--- |
-| **Orchestration & API** | Symfony 7.3 (PHP 8.4) | Doctrine ORM entities, form/API validation, Messenger, Twig UI |
+| **Frontend SPA** | React 19 (Vite) | Tailwind v4, Playwright E2E, Vitest |
+| **Orchestration & API** | Symfony 7.3 (PHP 8.4) | Pure REST API, Doctrine ORM entities, Messenger |
 | **Worker Queue** | Symfony Messenger | Auto-retries, failed transport, Doctrine DSN |
 | **Microservice Backend** | FastAPI (Python 3.12) | BackgroundTasks, lifespan hooks, admin DLQ endpoints |
 | **AI Integration** | LangChain | Prompt templates, multi-provider clients, JSON extraction |
@@ -147,7 +156,8 @@ docker compose up --build -d
 > On container startup, the PHP entrypoint runs Composer install, database migrations, messenger transport setup, and initializes the test database (when `APP_ENV` is not `test`).
 
 ### Access Ports
-- **Frontend Dashboard**: [http://localhost:8080](http://localhost:8080)
+- **Frontend Dashboard (React)**: [http://localhost:3000](http://localhost:3000)
+- **Backend API (Symfony)**: [http://localhost:8080/api](http://localhost:8080/api)
 - **FastAPI Interactive Docs (Swagger UI)**: [http://localhost:8001/docs](http://localhost:8001/docs)
 - **PostgreSQL Database**: `localhost:5432` (Username: `app`, Password: `app`, DB: `challenge_reviewer`)
 
@@ -178,7 +188,17 @@ docker compose exec python-evaluator pytest -v
 ```
 Covers file collection/truncation, callback retries + DLQ replayer, LLM fallback chains, and API endpoints (challenge text min length aligned with Symfony: 20 chars).
 
-### Run both
+### React Frontend (Vitest & Playwright)
+```bash
+# Unit & Component tests
+cd react-frontend && npm run test
+
+# End-to-End browser tests (requires docker compose stack to be running)
+cd react-frontend && npm run test:e2e
+```
+Covers component rendering, user flows, and real-time polling evaluation displays.
+
+### Run backend tests
 ```bash
 make test
 ```
