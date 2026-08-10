@@ -57,11 +57,16 @@ def _generate_destination_path(base_path: Path) -> Path:
 
 def _execute_git_clone(repo_url: str, dest_path: Path) -> None:
     clone_command = ["git", "clone", "--depth", CLONE_DEPTH, repo_url, str(dest_path)]
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_ASKPASS"] = "/bin/echo"
+
     result = subprocess.run(
         clone_command,
         capture_output=True,
         text=True,
         timeout=settings.clone_timeout_seconds,
+        env=env,
     )
     if result.returncode != 0:
         logger.error(f"Git clone failed: {result.stderr}")
