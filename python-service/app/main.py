@@ -45,9 +45,12 @@ def verify_internal_token(x_internal_token: str | None = Header(None, alias="X-I
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Cleanup stale temporary clone folders on startup
-    cleaned = cleanup_stale_clone_directories()
-    if cleaned > 0:
-        logger.info(f"Cleaned up {cleaned} stale clone folders on startup")
+    try:
+        cleaned = cleanup_stale_clone_directories()
+        if (cleaned or 0) > 0:
+            logger.info(f"Cleaned up {cleaned} stale clone folders on startup")
+    except Exception as cleanup_err:
+        logger.warning(f"Startup clone directory cleanup warning: {cleanup_err}")
     # Start DLQ replay cron - guarantees no feedback lost if Symfony was down
     task = asyncio.create_task(replay_loop())
     logger.info("Callback replay cron started")
@@ -229,6 +232,7 @@ async def evaluate(request: EvaluateRequest, background_tasks: BackgroundTasks):
 def _validate_github_url_or_warn(github_url: str) -> None:
     if not validate_github_url(github_url):
         logger.warning(f"Invalid GitHub URL format: {github_url}")
+        raise HTTPException(status_code=400, detail="Invalid GitHub URL format")
 
 
 def _validate_challenge_text(challenge_text: str) -> None:
