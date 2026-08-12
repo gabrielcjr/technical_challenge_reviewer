@@ -93,7 +93,7 @@ def extract_json_from_text(text: str) -> Dict[str, Any]:
 def _strip_markdown_fence(text: str) -> str:
     match = re.search(JSON_FENCE_PATTERN, text, re.DOTALL)
     if match:
-        return match.group(1)
+        return match.group(1).strip()
     return text
 
 
