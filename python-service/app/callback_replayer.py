@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import List
 
 from .config import settings
-from .symfony_client import _post_with_retry
+from .symfony_client import _post_with_retry, _dlq_lock
 
 logger = logging.getLogger(__name__)
 
@@ -160,22 +160,23 @@ def replay_failed_callbacks() -> ReplayResult:
     if not path.exists() or path.stat().st_size == 0:
         return ReplayResult(total=0, succeeded=0, still_failing=0)
 
-    entries = _read_entries(path)
-    if not entries:
-        # File contained only blank / malformed lines - clean it
-        _write_remaining(path, [])
-        return ReplayResult(total=0, succeeded=0, still_failing=0)
+    with _dlq_lock(path):
+        entries = _read_entries(path)
+        if not entries:
+            # File contained only blank / malformed lines - clean it
+            _write_remaining(path, [])
+            return ReplayResult(total=0, succeeded=0, still_failing=0)
 
-    succeeded = 0
-    remaining: List[FailedCallbackEntry] = []
+        succeeded = 0
+        remaining: List[FailedCallbackEntry] = []
 
-    for entry in entries:
-        if _attempt_single_replay(entry):
-            succeeded += 1
-        else:
-            remaining.append(entry)
+        for entry in entries:
+            if _attempt_single_replay(entry):
+                succeeded += 1
+            else:
+                remaining.append(entry)
 
-    _write_remaining(path, remaining)
+        _write_remaining(path, remaining)
 
     total = len(entries)
     still_failing = len(remaining)

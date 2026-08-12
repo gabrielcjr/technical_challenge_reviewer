@@ -160,10 +160,10 @@ def evaluate_with_llm(prompt: str) -> Tuple[Dict[str, Any], str]:
     Returns (normalized_result, provider_used)
     """
     providers = _determine_providers_to_try()
-    result = _try_providers_in_sequence(providers, prompt)
+    result, last_error = _try_providers_in_sequence(providers, prompt)
     if result:
         return result
-    return _handle_all_providers_failed()
+    return _handle_all_providers_failed(last_error)
 
 
 def _determine_providers_to_try() -> List[str]:
@@ -183,20 +183,18 @@ def _determine_providers_to_try() -> List[str]:
     return ordered
 
 
-def _try_providers_in_sequence(providers: List[str], prompt: str) -> Tuple[Dict[str, Any], str] | None:
+def _try_providers_in_sequence(providers: List[str], prompt: str) -> Tuple[Tuple[Dict[str, Any], str] | None, Exception | None]:
     last_error: Exception | None = None
 
     for provider_name in providers:
         try:
-            return _evaluate_with_single_provider(provider_name, prompt)
+            return _evaluate_with_single_provider(provider_name, prompt), None
         except Exception as provider_error:
             logger.warning(f"Provider {provider_name} failed: {provider_error}")
             last_error = provider_error
             continue
 
-    # Store last_error for fallback logic
-    _try_providers_in_sequence.last_error = last_error  # type: ignore
-    return None
+    return None, last_error
 
 
 def _evaluate_with_single_provider(provider: str, prompt: str) -> Tuple[Dict[str, Any], str]:
@@ -224,8 +222,7 @@ def _evaluate_with_single_provider(provider: str, prompt: str) -> Tuple[Dict[str
     return normalized, used_provider_name
 
 
-def _handle_all_providers_failed() -> Tuple[Dict[str, Any], str]:
-    last_error = getattr(_try_providers_in_sequence, "last_error", None)
+def _handle_all_providers_failed(last_error: Exception | None = None) -> Tuple[Dict[str, Any], str]:
     logger.error(f"All LLM providers failed, last error: {last_error}. Returning heuristic fallback.")
 
     if not settings.is_groq_configured() and not settings.is_gemini_configured():

@@ -99,14 +99,31 @@ def _ensure_parent_exists(path: pathlib.Path) -> None:
         pass
 
 
+import fcntl
+from contextlib import contextmanager
+
+
+@contextmanager
+def _dlq_lock(log_path: pathlib.Path):
+    lock_path = log_path.with_name(log_path.name + ".lock")
+    _ensure_parent_exists(lock_path)
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 def _log_failed_callback(url: str, payload: dict, error: Exception) -> None:
     try:
         log_file = _get_failed_path()
         _ensure_parent_exists(log_file)
-        with log_file.open("a", encoding="utf-8") as file_handle:
-            file_handle.write(
-                json.dumps({"url": url, "payload": payload, "error": str(error)}) + "\n"
-            )
+        with _dlq_lock(log_file):
+            with log_file.open("a", encoding="utf-8") as file_handle:
+                file_handle.write(
+                    json.dumps({"url": url, "payload": payload, "error": str(error)}) + "\n"
+                )
         logger.info(f"Logged failed callback to {log_file}")
     except Exception as log_error:
         logger.error(f"Failed to log failed callback: {log_error}")

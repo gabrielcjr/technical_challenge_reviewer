@@ -80,3 +80,38 @@ def test_get_failed_path_uses_config():
     assert isinstance(path, pathlib.Path)
     # Should be Path from settings
     assert path.name == "failed_callbacks.jsonl"
+
+
+def test_concurrent_dlq_locking(tmp_path):
+    import threading
+    from app.symfony_client import _log_failed_callback
+
+    dlq = tmp_path / "failed.jsonl"
+    with patch("app.callback_replayer.get_failed_path", return_value=dlq), \
+         patch("app.symfony_client._get_failed_path", return_value=dlq), \
+         patch("app.callback_replayer._post_with_retry", return_value=MagicMock()):
+
+        errors = []
+
+        def log_worker():
+            try:
+                for i in range(10):
+                    _log_failed_callback("http://test", {"submissionId": f"sub-{i}"}, Exception("err"))
+            except Exception as e:
+                errors.append(e)
+
+        def replay_worker():
+            try:
+                for _ in range(10):
+                    replay_failed_callbacks()
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=log_worker)
+        t2 = threading.Thread(target=replay_worker)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert not errors, f"Errors occurred during concurrent DLQ operations: {errors}"
