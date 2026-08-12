@@ -75,6 +75,28 @@ def _execute_git_clone(repo_url: str, dest_path: Path) -> None:
         raise RepositoryCloneError("Clone destination does not exist after clone")
 
 
+import time
+
+
+def cleanup_stale_clone_directories(base_dir: str | None = None, max_age_seconds: int = 3600) -> int:
+    """Removes orphaned temporary clone directories older than max_age_seconds."""
+    resolved_base = Path(base_dir or settings.clone_base_dir)
+    if not resolved_base.exists():
+        return 0
+
+    removed_count = 0
+    now = time.time()
+    for child in resolved_base.iterdir():
+        if child.is_dir() and child.name.startswith(TEMP_FOLDER_PREFIX):
+            try:
+                mtime = child.stat().st_mtime
+                if now - mtime > max_age_seconds:
+                    shutil.rmtree(child, ignore_errors=True)
+                    removed_count += 1
+                    logger.info(f"Cleaned up stale clone folder {child}")
+            except Exception as err:
+                logger.warning(f"Failed to check/remove stale folder {child}: {err}")
+
 def _cleanup_directory(path: Path) -> None:
     if not path.exists():
         return

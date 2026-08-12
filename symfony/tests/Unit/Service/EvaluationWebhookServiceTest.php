@@ -102,6 +102,11 @@ class EvaluationWebhookServiceTest extends TestCase
         $this->assertEquals('POST', $capturedRequest['method']);
         $this->assertStringContainsString('/evaluate', $capturedRequest['url']);
 
+        if (isset($capturedRequest['options']['headers'])) {
+            $this->assertArrayHasKey('X-Internal-Token', $capturedRequest['options']['headers']);
+            $this->assertEquals('secret_token', $capturedRequest['options']['headers']['X-Internal-Token']);
+        }
+
         $body = $capturedRequest['options']['body'] ?? '';
         // body is json encoded
         $decoded = json_decode($body, true);
