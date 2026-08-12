@@ -72,6 +72,9 @@ class EvaluationWebhookService
     private function sendEvaluationRequest(array $payload)
     {
         return $this->httpClient->request('POST', $this->config->getEvaluatorEndpoint(), [
+            'headers' => [
+                'X-Internal-Token' => $this->config->callbackToken,
+            ],
             'json' => $payload,
             'timeout' => self::TIMEOUT_SECONDS,
         ]);

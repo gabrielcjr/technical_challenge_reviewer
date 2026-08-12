@@ -102,6 +102,20 @@ class EvaluationWebhookServiceTest extends TestCase
         $this->assertEquals('POST', $capturedRequest['method']);
         $this->assertStringContainsString('/evaluate', $capturedRequest['url']);
 
+        if (isset($capturedRequest['options']['headers'])) {
+            $headers = $capturedRequest['options']['headers'];
+            $found = false;
+            foreach ($headers as $key => $val) {
+                if (is_string($key) && strcasecmp($key, 'X-Internal-Token') === 0 && $val === 'secret_token') {
+                    $found = true;
+                }
+                if (is_string($val) && str_contains(strtolower($val), 'x-internal-token: secret_token')) {
+                    $found = true;
+                }
+            }
+            $this->assertTrue($found, 'X-Internal-Token header not found in captured request options');
+        }
+
         $body = $capturedRequest['options']['body'] ?? '';
         // body is json encoded
         $decoded = json_decode($body, true);

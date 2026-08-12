@@ -2,12 +2,12 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends
 from fastapi.responses import JSONResponse
 
 from .config import settings
 from .models import EvaluateRequest, HealthResponse
-from .repo_cloner import cloned_repo, validate_github_url
+from .repo_cloner import cloned_repo, validate_github_url, cleanup_stale_clone_directories
 from .evaluator import evaluate_repository
 from .symfony_client import EvaluationCallback, send_evaluation_callback
 from .callback_replayer import (
@@ -35,8 +35,22 @@ def _configure_logging() -> None:
 _configure_logging()
 
 
+def verify_internal_token(x_internal_token: str | None = Header(None, alias="X-Internal-Token")) -> None:
+    expected_token = settings.callback_token
+    if expected_token and expected_token not in ("", "s3cr3t_shared_token_change_me"):
+        if not x_internal_token or x_internal_token != expected_token:
+            raise HTTPException(status_code=401, detail="Unauthorized internal request")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Cleanup stale temporary clone folders on startup
+    try:
+        cleaned = cleanup_stale_clone_directories()
+        if (cleaned or 0) > 0:
+            logger.info(f"Cleaned up {cleaned} stale clone folders on startup")
+    except Exception as cleanup_err:
+        logger.warning(f"Startup clone directory cleanup warning: {cleanup_err}")
     # Start DLQ replay cron - guarantees no feedback lost if Symfony was down
     task = asyncio.create_task(replay_loop())
     logger.info("Callback replay cron started")
@@ -88,7 +102,7 @@ async def root():
     return {"message": "Challenge Evaluator API", "docs": "/docs", "health": "/health"}
 
 
-@app.get("/admin/replay-status")
+@app.get("/admin/replay-status", dependencies=[Depends(verify_internal_token)])
 async def replay_status():
     count = await asyncio.to_thread(get_failed_callbacks_count)
     path = get_failed_path()
@@ -99,7 +113,7 @@ async def replay_status():
     }
 
 
-@app.post("/admin/replay-failed-callbacks")
+@app.post("/admin/replay-failed-callbacks", dependencies=[Depends(verify_internal_token)])
 async def replay_failed():
     result = await asyncio.to_thread(replay_failed_callbacks)
     return result.to_dict()
@@ -142,7 +156,7 @@ def _clone_and_evaluate(task: EvaluationTask):
         result, metadata = evaluate_repository(repo_path, task.challenge_text)
         logger.info(
             f"[Background] Evaluation completed for {task.submission_id}: "
-            f"approved={result['approved']}, provider={metadata.get('llm_provider_used')}"
+            f"approved={result.get('approved', False)}, provider={metadata.get('llm_provider_used')}"
         )
         return result, metadata
 
@@ -151,9 +165,9 @@ def _send_success_callback(task: EvaluationTask, result: dict, metadata: dict) -
     raw_output = str(result.get("raw", ""))[:RAW_OUTPUT_TRUNCATION_LENGTH]
     callback = EvaluationCallback(
         submission_id=task.submission_id,
-        approved=result["approved"],
-        summary=result["summary"],
-        improvements=result["improvements"],
+        approved=bool(result.get("approved", False)),
+        summary=str(result.get("summary", "Evaluation completed")),
+        improvements=result.get("improvements", []),
         reasoning=result.get("reasoning"),
         raw_output=raw_output,
     )
@@ -186,7 +200,7 @@ def _send_failure_callback(task: EvaluationTask, error: Exception) -> None:
 
 
 # --- API Endpoint with extracted validations ---
-@app.post("/evaluate", status_code=202)
+@app.post("/evaluate", status_code=202, dependencies=[Depends(verify_internal_token)])
 async def evaluate(request: EvaluateRequest, background_tasks: BackgroundTasks):
     """
     Receives evaluation request from Symfony.
