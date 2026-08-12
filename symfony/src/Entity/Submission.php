@@ -209,6 +209,9 @@ class Submission
     // --- Domain behaviors - encapsulate state transitions ---
     public function markAsProcessing(): void
     {
+        if ($this->isFinal()) {
+            return;
+        }
         $this->status = SubmissionStatus::PROCESSING;
         $this->appendProcessingLog('Status changed to PROCESSING');
     }
