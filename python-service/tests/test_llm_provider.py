@@ -21,6 +21,20 @@ def test_extract_json_with_extra_text():
     data = extract_json_from_text(text)
     assert data["approved"] is True
 
+def test_extract_json_with_embedded_code_braces():
+    text = """```json
+{
+  "approved": true,
+  "summary": "Implements function foo() { return 1; } correctly",
+  "improvements": ["Refactor bar() { baz(); }"],
+  "reasoning": "Good code"
+}
+```"""
+    data = extract_json_from_text(text)
+    assert data["approved"] is True
+    assert "foo() { return 1; }" in data["summary"]
+    assert "bar() { baz(); }" in data["improvements"][0]
+
 def test_normalize_result():
     data = {
         "approved": "true",
