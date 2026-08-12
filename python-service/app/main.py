@@ -218,6 +218,7 @@ async def evaluate(request: EvaluateRequest, background_tasks: BackgroundTasks):
 def _validate_github_url_or_warn(github_url: str) -> None:
     if not validate_github_url(github_url):
         logger.warning(f"Invalid GitHub URL format: {github_url}")
+        raise HTTPException(status_code=400, detail="Invalid GitHub URL format")
 
 
 def _validate_challenge_text(challenge_text: str) -> None:

@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Generator
+from urllib.parse import urlparse
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,7 @@ from .config import settings
 
 # Constants
 GITHUB_DOMAIN = "github.com"
-ALLOWED_URL_SCHEMES = ("https://", "http://", "git@")
+ALLOWED_URL_SCHEMES = ("https://", "http://")
 CLONE_DEPTH = "1"
 TEMP_FOLDER_PREFIX = "repo_"
 UUID_SHORT_LENGTH = 8
@@ -25,22 +26,24 @@ class RepositoryCloneError(RuntimeError):
 
 
 def validate_github_url(url: str) -> bool:
-    """Validate that URL looks like a GitHub HTTPS URL."""
+    """Validate that URL is a valid GitHub HTTP(S) URL targeting github.com."""
     if not url:
         return False
-    if SUPPORTED_GIT_HOST not in url:
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("https", "http"):
+            return False
+        if parsed.netloc.lower() != SUPPORTED_GIT_HOST:
+            return False
+        return True
+    except Exception:
         return False
-    if not url.startswith(("https://", "http://")):
-        return False
-    return True
 
 
 def _validate_url_for_clone(repo_url: str) -> None:
     """Raise ValueError if URL format is invalid for git clone."""
-    if not repo_url.startswith(ALLOWED_URL_SCHEMES):
-        raise ValueError(f"Invalid repo URL: {repo_url} must start with {ALLOWED_URL_SCHEMES}")
-    if SUPPORTED_GIT_HOST not in repo_url:
-        logger.warning(f"Repo URL does not contain {SUPPORTED_GIT_HOST}: {repo_url}")
+    if not validate_github_url(repo_url):
+        raise ValueError(f"Invalid repo URL: {repo_url} must be a valid {SUPPORTED_GIT_HOST} HTTP(S) URL")
 
 
 def _prepare_base_directory(base_dir: str) -> Path:

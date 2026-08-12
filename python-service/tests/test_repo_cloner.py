@@ -9,6 +9,10 @@ def test_validate_github_url():
     assert validate_github_url("") is False
     assert validate_github_url("not a url") is False
     assert validate_github_url("https://github.com/octocat/Hello-World") is True
+    # Security edge cases
+    assert validate_github_url("https://github.com.attacker.com/repo") is False
+    assert validate_github_url("https://attacker.com/github.com/repo") is False
+    assert validate_github_url("git@-oProxyCommand=calc.exe:user/repo.git") is False
 
 def test_cloned_repo_invalid_url():
     with pytest.raises((RuntimeError, ValueError)):
