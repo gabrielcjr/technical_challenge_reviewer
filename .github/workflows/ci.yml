@@ -25,34 +25,43 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Prepare .env file
         run: |
           cp .env.example .env || true
-          cp symfony/.env.example symfony/.env || true
           cat > .env <<'EOF'
           POSTGRES_DB=challenge_reviewer
           POSTGRES_USER=app
           POSTGRES_PASSWORD=app
           POSTGRES_PORT=5432
-          DATABASE_URL=postgresql://app:app@database:5432/challenge_reviewer?serverVersion=17&charset=utf8
-          MESSENGER_TRANSPORT_DSN=doctrine://default?queue_name=async
-          APP_SECRET=test_random_secret_for_ci_32_chars_long
-          APP_ENV=test
+          DATABASE_URL=postgresql://app:app@database:5432/challenge_reviewer
+          DJANGO_SECRET_KEY=test_random_secret_for_ci_32_chars_long
           SYMFONY_PORT=8080
-          SYMFONY_APP_URL=http://localhost:8080
           PYTHON_EVALUATOR_URL=http://python-evaluator:8000
+          DJANGO_CALLBACK_URL=http://nginx/api/internal/evaluation-result
           CALLBACK_TOKEN=s3cr3t_shared_token_change_me
           EVALUATOR_PORT=8001
           GROQ_API_KEY=dummy_key_for_ci
           GEMINI_API_KEY=dummy_key_for_ci
           LLM_PROVIDER=auto
-          SYMFONY_CALLBACK_URL=http://nginx/api/internal/evaluation-result
-          COMPOSER_ALLOW_SUPERUSER=1
           EOF
           cat .env
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install linter tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black isort autoflake
+
+      - name: Run linter checks
+        run: |
+          make run-check-linters
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Build Docker images
         run: docker compose build --no-cache
@@ -67,27 +76,18 @@ jobs:
 
       - name: Start all services
         run: |
-          docker compose up -d php nginx python-evaluator php-worker frontend
+          docker compose up -d django nginx python-evaluator django-worker frontend
           docker compose ps
           # Give services a moment to initialize
           sleep 10
 
-      - name: Install Symfony dependencies (inside container)
+      - name: Run Django migrations
         run: |
-          docker compose exec -T php bash -c "composer install --no-progress --prefer-dist --no-interaction || composer install --no-progress"
-          docker compose exec -T php php -v
-          docker compose exec -T php php bin/console --version
+          docker compose exec -T django python manage.py migrate --noinput
 
-      - name: Prepare Symfony test database
+      - name: Run Django tests
         run: |
-          docker compose exec -T php php bin/console doctrine:database:create --env=test --if-not-exists --no-interaction
-          docker compose exec -T php php bin/console doctrine:migrations:migrate --env=test --no-interaction
-          docker compose exec -T php php bin/console messenger:setup-transports --env=test --no-interaction || echo "messenger setup failed, continuing"
-          docker compose exec -T php php bin/console cache:clear --env=test || true
-
-      - name: Run Symfony PHP tests
-        run: |
-          docker compose exec -T php php bin/phpunit --testdox --colors=always
+          docker compose exec -T django python manage.py test
 
       - name: Run Python evaluator tests
         run: |
@@ -122,8 +122,8 @@ jobs:
         run: |
           echo "=== docker compose ps ==="
           docker compose ps -a
-          echo "=== PHP health ==="
-          docker compose exec -T php php bin/console about || true
+          echo "=== Django health ==="
+          docker compose exec -T django python manage.py check || true
           echo "=== Python health check ==="
           curl -sf http://localhost:8001/health || docker compose exec -T python-evaluator curl -sf http://localhost:8000/health || echo "health endpoint not reachable via localhost, checking inside network"
           docker compose exec -T python-evaluator python -c "import app.main; print('FastAPI app import OK')" || true
@@ -133,14 +133,14 @@ jobs:
         run: |
           echo "=== database logs ==="
           docker compose logs --tail=200 database || true
-          echo "=== php logs ==="
-          docker compose logs --tail=200 php || true
+          echo "=== django logs ==="
+          docker compose logs --tail=200 django || true
           echo "=== nginx logs ==="
           docker compose logs --tail=200 nginx || true
           echo "=== python-evaluator logs ==="
           docker compose logs --tail=200 python-evaluator || true
-          echo "=== php-worker logs ==="
-          docker compose logs --tail=200 php-worker || true
+          echo "=== django-worker logs ==="
+          docker compose logs --tail=200 django-worker || true
 
       - name: Tear down
         if: always()

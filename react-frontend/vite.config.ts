@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -15,6 +15,7 @@ export default defineConfig({
       }
     }
   },
+  // @ts-expect-error vitest inline type definition
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/setupTests.ts'],

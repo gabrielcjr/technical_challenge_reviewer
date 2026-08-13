@@ -1,6 +1,6 @@
 import json
 import pathlib
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from app.callback_replayer import (
     ReplayResult,
@@ -37,9 +37,10 @@ def test_replayer_success_clears_file(tmp_path):
         )
         + "\n"
     )
-    with patch("app.callback_replayer.get_failed_path", return_value=dlq), patch(
-        "app.callback_replayer._post_with_retry", return_value=MagicMock()
-    ) as mock_post:
+    with (
+        patch("app.callback_replayer.get_failed_path", return_value=dlq),
+        patch("app.callback_replayer._post_with_retry", return_value=MagicMock()) as mock_post,
+    ):
         result = replay_failed_callbacks()
         assert result.total == 1 and result.succeeded == 1 and result.still_failing == 0
         assert not dlq.exists(), "file should be deleted after success"
@@ -58,8 +59,9 @@ def test_replayer_keeps_failed(tmp_path):
         )
         + "\n"
     )
-    with patch("app.callback_replayer.get_failed_path", return_value=dlq), patch(
-        "app.callback_replayer._post_with_retry", side_effect=Exception("still down")
+    with (
+        patch("app.callback_replayer.get_failed_path", return_value=dlq),
+        patch("app.callback_replayer._post_with_retry", side_effect=Exception("still down")),
     ):
         result = replay_failed_callbacks()
         assert result.total == 1 and result.succeeded == 0 and result.still_failing == 1
@@ -84,12 +86,15 @@ def test_get_failed_path_uses_config():
 
 def test_concurrent_dlq_locking(tmp_path):
     import threading
+
     from app.symfony_client import _log_failed_callback
 
     dlq = tmp_path / "failed.jsonl"
-    with patch("app.callback_replayer.get_failed_path", return_value=dlq), \
-         patch("app.symfony_client._get_failed_path", return_value=dlq), \
-         patch("app.callback_replayer._post_with_retry", return_value=MagicMock()):
+    with (
+        patch("app.callback_replayer.get_failed_path", return_value=dlq),
+        patch("app.symfony_client._get_failed_path", return_value=dlq),
+        patch("app.callback_replayer._post_with_retry", return_value=MagicMock()),
+    ):
 
         errors = []
 

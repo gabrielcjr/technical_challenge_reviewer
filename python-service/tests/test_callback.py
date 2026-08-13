@@ -1,7 +1,7 @@
-import pytest
 import respx
-from httpx import Response
 from app.symfony_client import send_callback
+from httpx import Response
+
 
 @respx.mock
 def test_callback_success():
@@ -14,10 +14,11 @@ def test_callback_success():
         approved=True,
         summary="Good job",
         improvements=["Add tests"],
-        reasoning="All good"
+        reasoning="All good",
     )
 
     assert success is True
+
 
 @respx.mock
 def test_callback_failure_retries():
@@ -31,17 +32,19 @@ def test_callback_failure_retries():
         approved=False,
         summary="Failed",
         improvements=[],
-        reasoning="Error"
+        reasoning="Error",
     )
 
     # Should return False after retries
     assert success is False
 
+
 def test_callback_payload_structure():
     # Ensure payload contains required fields
     import app.symfony_client as client_module
+
     # We can't easily intercept payload without mocking _post_with_retry, but test that function exists
-    assert hasattr(client_module, 'send_callback')
+    assert hasattr(client_module, "send_callback")
 
 
 def test_evaluation_callback_includes_failed_flag():
@@ -83,5 +86,6 @@ def test_callback_success_with_failed_flag():
     assert route.called
     body = route.calls.last.request.content
     import json
+
     data = json.loads(body)
     assert data["failed"] is True

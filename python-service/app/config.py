@@ -1,6 +1,6 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Literal
 
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Constants for clean code - intention revealing
 SENTINEL_TEST_TOKENS = ("", "gsk_test", "test")
@@ -25,8 +25,14 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
 
     llm_provider: Literal["auto", "groq", "gemini"] = "auto"
+    django_callback_url: str = DEFAULT_CALLBACK_URL
     symfony_callback_url: str = DEFAULT_CALLBACK_URL
     callback_token: str = "s3cr3t_shared_token_change_me"
+
+    @property
+    def callback_url(self) -> str:
+        return self.django_callback_url or self.symfony_callback_url or DEFAULT_CALLBACK_URL
+
     clone_base_dir: str = DEFAULT_CLONE_BASE_DIR
 
     # Evaluation limits - named constants with units
@@ -44,15 +50,10 @@ class Settings(BaseSettings):
         return self.groq_api_key or ""
 
     def is_groq_configured(self) -> bool:
-        return bool(
-            self.resolved_groq_api_key
-            and self.resolved_groq_api_key not in SENTINEL_TEST_TOKENS
-        )
+        return bool(self.resolved_groq_api_key and self.resolved_groq_api_key not in SENTINEL_TEST_TOKENS)
 
     def is_gemini_configured(self) -> bool:
-        return bool(
-            self.gemini_api_key and self.gemini_api_key not in SENTINEL_TEST_TOKENS
-        )
+        return bool(self.gemini_api_key and self.gemini_api_key not in SENTINEL_TEST_TOKENS)
 
 
 settings = Settings()

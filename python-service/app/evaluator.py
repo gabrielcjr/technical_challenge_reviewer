@@ -1,11 +1,11 @@
 import logging
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Any, Dict, Tuple
 
-from .file_collector import collect_files
-from .prompts import build_evaluation_prompt, build_fallback_prompt
-from .llm_provider import evaluate_with_llm
 from .config import settings
+from .file_collector import collect_files
+from .llm_provider import evaluate_with_llm
+from .prompts import build_evaluation_prompt, build_fallback_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,9 @@ def _build_prompt_for_contents(challenge_text: str, file_tree: str, file_content
     return build_fallback_prompt(challenge_text, file_tree)
 
 
-def _evaluate_with_llm_and_handle_errors(prompt: str, metadata: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def _evaluate_with_llm_and_handle_errors(
+    prompt: str, metadata: Dict[str, Any]
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     try:
         result, provider_used = evaluate_with_llm(prompt)
         metadata["llm_provider_used"] = provider_used
@@ -63,7 +65,9 @@ def _evaluate_with_llm_and_handle_errors(prompt: str, metadata: Dict[str, Any]) 
         return _build_evaluation_failure_result(evaluation_error, metadata)
 
 
-def _build_evaluation_failure_result(error: Exception, metadata: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def _build_evaluation_failure_result(
+    error: Exception, metadata: Dict[str, Any]
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     truncated_error = str(error)[:ERROR_DETAIL_TRUNCATE_LENGTH]
     fallback_result = {
         "approved": False,

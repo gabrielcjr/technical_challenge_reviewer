@@ -1,16 +1,17 @@
+import logging
 import os
 import shutil
 import subprocess
+import time
 import uuid
-from pathlib import Path
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Generator
 from urllib.parse import urlparse
-import logging
-
-logger = logging.getLogger(__name__)
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 # Constants
 GITHUB_DOMAIN = "github.com"
@@ -76,9 +77,6 @@ def _execute_git_clone(repo_url: str, dest_path: Path) -> None:
         raise RepositoryCloneError(f"Failed to clone repository: {result.stderr}")
     if not dest_path.exists():
         raise RepositoryCloneError("Clone destination does not exist after clone")
-
-
-import time
 
 
 def cleanup_stale_clone_directories(base_dir: str | None = None, max_age_seconds: int = 3600) -> int:

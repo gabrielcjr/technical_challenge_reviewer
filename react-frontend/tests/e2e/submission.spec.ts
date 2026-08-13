@@ -43,6 +43,6 @@ test.describe('Challenge and Submission Flow', () => {
     await expect(page.locator('h1')).toContainText(uniqueUser);
     
     // Verify status is displayed
-    await expect(page.locator('text=pending').or(page.locator('text=processing'))).toBeVisible();
+    await expect(page.getByText('pending', { exact: true }).or(page.getByText('processing', { exact: true }))).toBeVisible();
   });
 });

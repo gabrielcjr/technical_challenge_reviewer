@@ -1,6 +1,8 @@
 import tempfile
 from pathlib import Path
-from app.file_collector import collect_files, should_ignore, is_relevant_file
+
+from app.file_collector import collect_files, is_relevant_file, should_ignore
+
 
 def test_should_ignore():
     assert should_ignore(Path(".git/config")) is True
@@ -8,11 +10,13 @@ def test_should_ignore():
     assert should_ignore(Path("vendor/autoload")) is True
     assert should_ignore(Path("src/Controller")) is False
 
+
 def test_is_relevant_file():
     assert is_relevant_file(Path("README.md")) is True
     assert is_relevant_file(Path("src/Controller.py")) is True
     assert is_relevant_file(Path("package-lock.json")) is False
     assert is_relevant_file(Path("Dockerfile")) is True
+
 
 def test_collect_files_simple():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -31,6 +35,7 @@ def test_collect_files_simple():
         assert meta["total_files"] >= 2
         assert meta["collected_files"] >= 1
         assert "This is a readme" in contents
+
 
 def test_collect_files_truncation():
     with tempfile.TemporaryDirectory() as tmpdir:

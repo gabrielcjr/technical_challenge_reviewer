@@ -1,4 +1,4 @@
-.PHONY: build up down logs ps shell php-shell python-shell install migrate fixtures worker-logs test
+.PHONY: build up down logs ps shell django-shell python-shell migrate worker-logs test test-django test-python restart rebuild run-check-flake8 run-check-black run-fix-black run-check-isort run-fix-isort run-fix-autoflake run-check-linters run-fix-linters
 
 include .env
 export
@@ -13,7 +13,7 @@ up:
 	@echo "Services:"
 	docker compose ps
 	@echo ""
-	@echo "Symfony: http://localhost:$${SYMFONY_PORT:-8080}"
+	@echo "Django Backend API: http://localhost:$${SYMFONY_PORT:-8080}"
 	@echo "Python Evaluator: http://localhost:$${EVALUATOR_PORT:-8001}/docs"
 	@echo "Postgres: localhost:$${POSTGRES_PORT:-5432}"
 
@@ -29,52 +29,58 @@ logs:
 ps:
 	docker compose ps
 
-php-shell:
-	docker compose exec php sh
+django-shell:
+	docker compose exec django sh
 
 python-shell:
 	docker compose exec python-evaluator sh
 
-install:
-	docker compose exec php composer install
-
 migrate:
-	docker compose exec php php bin/console doctrine:migrations:migrate --no-interaction
+	docker compose exec django python manage.py migrate --noinput
 
-migrations-diff:
-	docker compose exec php php bin/console doctrine:migrations:diff
-
-fixtures:
-	@echo "No Doctrine fixtures are defined in this project."
-	@echo "Create challenges via the UI: http://localhost:$${SYMFONY_PORT:-8080}/challenges/new"
+makemigrations:
+	docker compose exec django python manage.py makemigrations
 
 worker-logs:
-	docker compose logs -f php-worker
+	docker compose logs -f django-worker
 
-cache-clear:
-	docker compose exec php php bin/console cache:clear
-
-messenger-failed:
-	docker compose exec php php bin/console messenger:failed:show
-
-messenger-retry:
-	docker compose exec php php bin/console messenger:failed:retry
-
-symfony-new:
-	docker run --rm -v $$(pwd)/symfony:/app -w /app composer:2 create-project symfony/skeleton . "7.3.*"
-
-composer-req:
-	docker compose exec php composer require $(pkg)
-
-test-php:
-	docker compose exec php php bin/phpunit
+test-django:
+	docker compose exec django python manage.py test
 
 test-python:
 	docker compose exec python-evaluator pytest -v
 
 test:
-	$(MAKE) test-php
+	$(MAKE) test-django
 	$(MAKE) test-python
+
+run-check-flake8:
+	flake8 . --config .flake8 --count --show-source --statistics
+
+run-check-black:
+	black --check . --config pyproject.toml
+
+run-fix-black:
+	black . --config pyproject.toml
+
+run-check-isort:
+	isort . --check-only --settings-file pyproject.toml
+
+run-fix-isort:
+	isort . --settings-file pyproject.toml
+
+run-fix-autoflake:
+	autoflake --remove-all-unused-imports --recursive --in-place . --exclude=apps.py,.venv,.docker
+
+run-check-linters:
+	make run-check-flake8
+	make run-check-black
+	make run-check-isort
+
+run-fix-linters:
+	make run-fix-black
+	make run-fix-isort
+	make run-fix-autoflake
 
 restart:
 	docker compose restart

@@ -1,6 +1,8 @@
-import pytest
-from app.repo_cloner import validate_github_url, cloned_repo
 from pathlib import Path
+
+import pytest
+from app.repo_cloner import cloned_repo, validate_github_url
+
 
 def test_validate_github_url():
     assert validate_github_url("https://github.com/user/repo") is True
@@ -14,10 +16,12 @@ def test_validate_github_url():
     assert validate_github_url("https://attacker.com/github.com/repo") is False
     assert validate_github_url("git@-oProxyCommand=calc.exe:user/repo.git") is False
 
+
 def test_cloned_repo_invalid_url():
     with pytest.raises((RuntimeError, ValueError)):
         with cloned_repo("https://github.com/nonexistentuser12345/nonexistentrepo12345-xyz"):
             pass
+
 
 def test_cloned_repo_success():
     # Use a tiny public repo

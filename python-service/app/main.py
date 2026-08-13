@@ -2,20 +2,21 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends
+
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 
-from .config import settings
-from .models import EvaluateRequest, HealthResponse
-from .repo_cloner import cloned_repo, validate_github_url, cleanup_stale_clone_directories
-from .evaluator import evaluate_repository
-from .symfony_client import EvaluationCallback, send_evaluation_callback
 from .callback_replayer import (
-    get_failed_path,
     get_failed_callbacks_count,
+    get_failed_path,
     replay_failed_callbacks,
     replay_loop,
 )
+from .config import settings
+from .evaluator import evaluate_repository
+from .models import EvaluateRequest, HealthResponse
+from .repo_cloner import cleanup_stale_clone_directories, cloned_repo, validate_github_url
+from .symfony_client import EvaluationCallback, send_evaluation_callback
 
 # --- Constants ---
 # Keep aligned with Symfony Submission challengeSnapshot min length (20).
@@ -237,7 +238,9 @@ def _validate_github_url_or_warn(github_url: str) -> None:
 
 def _validate_challenge_text(challenge_text: str) -> None:
     if not challenge_text or len(challenge_text.strip()) < MIN_CHALLENGE_TEXT_LENGTH:
-        raise HTTPException(status_code=400, detail=f"challengeText too short, minimum {MIN_CHALLENGE_TEXT_LENGTH} chars")
+        raise HTTPException(
+            status_code=400, detail=f"challengeText too short, minimum {MIN_CHALLENGE_TEXT_LENGTH} chars"
+        )
 
 
 @app.exception_handler(Exception)
