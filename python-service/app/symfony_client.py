@@ -77,7 +77,7 @@ def _raise_for_server_errors(response: httpx.Response) -> None:
 
 
 def _resolve_callback_url(provided_url: str) -> str:
-    return provided_url or settings.symfony_callback_url
+    return provided_url or settings.callback_url or getattr(settings, "symfony_callback_url", "http://nginx/api/internal/evaluation-result")
 
 
 def _resolve_callback_token(provided_token: str) -> str:
