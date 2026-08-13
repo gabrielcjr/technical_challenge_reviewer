@@ -1,13 +1,14 @@
 import json
 
+from django.conf import settings
 from django.test import Client, TestCase
-from reviewer.models import Submission, SubmissionStatus
+from reviewer.models import MAX_LOG_LENGTH, Submission, SubmissionStatus
 
 
 class ReviewerApiTestCase(TestCase):
     def setUp(self):
         self.client = Client()
-        self.callback_token = "default_secret_callback_token_123"
+        self.callback_token = getattr(settings, "CALLBACK_TOKEN", "default_secret_callback_token_123")
 
     def test_health_check(self):
         response = self.client.get("/api/internal/health")
@@ -82,6 +83,46 @@ class ReviewerApiTestCase(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_submission_retry_allowed_and_forbidden(self):
+        sub_failed = Submission.objects.create(
+            user_name="Retry Candidate",
+            github_repo_url="https://github.com/user/retry-repo",
+            challenge_snapshot="Sample prompt snapshot",
+            status=SubmissionStatus.FAILED,
+        )
+
+        # Retry allowed on FAILED
+        response = self.client.post(f"/api/submissions/{sub_failed.id}/retry")
+        self.assertEqual(response.status_code, 200)
+        sub_failed.refresh_from_db()
+        self.assertIn(sub_failed.status, [SubmissionStatus.PENDING, SubmissionStatus.PROCESSING])
+
+        # Retry forbidden on finalized APPROVED
+        sub_approved = Submission.objects.create(
+            user_name="Approved Candidate",
+            github_repo_url="https://github.com/user/approved-repo",
+            challenge_snapshot="Sample prompt snapshot",
+            status=SubmissionStatus.APPROVED,
+            approved=True,
+        )
+        response = self.client.post(f"/api/submissions/{sub_approved.id}/retry")
+        self.assertEqual(response.status_code, 400)
+
+    def test_submission_not_found(self):
+        response = self.client.get("/api/submissions/00000000-0000-0000-0000-000000000000")
+        self.assertEqual(response.status_code, 404)
+
+    def test_log_truncation(self):
+        sub = Submission.objects.create(
+            user_name="Log Test",
+            github_repo_url="https://github.com/user/log-repo",
+            challenge_snapshot="Sample snapshot text",
+        )
+        for i in range(500):
+            sub.append_processing_log(f"Iteration message {i} with additional context string")
+
+        self.assertLessEqual(len(sub.processing_logs), MAX_LOG_LENGTH)
+
     def test_internal_callback_authentication_and_update(self):
         sub = Submission.objects.create(
             user_name="John Doe",
@@ -106,16 +147,12 @@ class ReviewerApiTestCase(TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
-        from django.conf import settings
-
-        token = getattr(settings, "CALLBACK_TOKEN", "default_secret_callback_token_123")
-
         # Authorized attempt
         response = self.client.post(
             "/api/internal/evaluation-result",
             data=json.dumps(callback_payload),
             content_type="application/json",
-            headers={"X-Internal-Token": token},
+            headers={"X-Internal-Token": self.callback_token},
         )
         self.assertEqual(response.status_code, 200)
         res_data = response.json()
