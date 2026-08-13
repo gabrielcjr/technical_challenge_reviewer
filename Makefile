@@ -1,4 +1,4 @@
-.PHONY: build up down logs ps shell django-shell python-shell migrate worker-logs test test-django test-python restart rebuild
+.PHONY: build up down logs ps shell django-shell python-shell migrate worker-logs test test-django test-python restart rebuild run-check-flake8 run-check-black run-fix-black run-check-isort run-fix-isort run-fix-autoflake run-check-linters run-fix-linters
 
 include .env
 export
@@ -53,6 +53,34 @@ test-python:
 test:
 	$(MAKE) test-django
 	$(MAKE) test-python
+
+run-check-flake8:
+	flake8 . --config .flake8 --count --show-source --statistics
+
+run-check-black:
+	black --check . --config pyproject.toml
+
+run-fix-black:
+	black . --config pyproject.toml
+
+run-check-isort:
+	isort . --check-only --settings-file pyproject.toml
+
+run-fix-isort:
+	isort . --settings-file pyproject.toml
+
+run-fix-autoflake:
+	autoflake --remove-all-unused-imports --recursive --in-place . --exclude=apps.py,.venv,.docker
+
+run-check-linters:
+	make run-check-flake8
+	make run-check-black
+	make run-check-isort
+
+run-fix-linters:
+	make run-fix-black
+	make run-fix-isort
+	make run-fix-autoflake
 
 restart:
 	docker compose restart
