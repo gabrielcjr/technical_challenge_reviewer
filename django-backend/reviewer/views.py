@@ -1,16 +1,17 @@
 import logging
+
 from django.conf import settings
 from django.utils import timezone
-from django.urls import reverse
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from .models import Challenge, Submission, SubmissionStatus
-from .serializers import ChallengeSerializer, SubmissionCreateSerializer, EvaluationCallbackSerializer
+from .serializers import ChallengeSerializer, EvaluationCallbackSerializer, SubmissionCreateSerializer
 from .utils import dispatch_evaluation
 
 logger = logging.getLogger(__name__)
+
 
 @api_view(["GET", "POST"])
 def challenge_list_create(request):
@@ -26,17 +27,18 @@ def challenge_list_create(request):
             error_map = {}
             for field, errors in serializer.errors.items():
                 error_map[field] = errors[0] if isinstance(errors, list) else str(errors)
-            
+
             # If title or description missing completely, return flat error
             title = request.data.get("title")
             description = request.data.get("description")
             if not title or not description:
                 return Response({"error": "title and description required"}, status=status.HTTP_400_BAD_REQUEST)
-                
+
             return Response({"errors": error_map}, status=status.HTTP_400_BAD_REQUEST)
 
         challenge = serializer.save()
         return Response({"id": str(challenge.id), "title": challenge.title}, status=status.HTTP_201_CREATED)
+
 
 @api_view(["GET", "POST"])
 def submission_list_create(request):
@@ -53,12 +55,32 @@ def submission_list_create(request):
                 err_msg = errors["non_field_errors"][0]
                 return Response({"error": err_msg}, status=status.HTTP_400_BAD_REQUEST)
             if "userName" in errors and "githubRepoUrl" in errors:
-                return Response({"error": "userName and githubRepoUrl are required"}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"error": "userName and githubRepoUrl are required"}, status=status.HTTP_400_BAD_REQUEST
+                )
             if "githubRepoUrl" in errors:
-                return Response({"error": errors["githubRepoUrl"][0] if isinstance(errors["githubRepoUrl"], list) else str(errors["githubRepoUrl"])}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {
+                        "error": (
+                            errors["githubRepoUrl"][0]
+                            if isinstance(errors["githubRepoUrl"], list)
+                            else str(errors["githubRepoUrl"])
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             if "customChallengeText" in errors:
-                return Response({"error": errors["customChallengeText"][0] if isinstance(errors["customChallengeText"], list) else str(errors["customChallengeText"])}, status=status.HTTP_400_BAD_REQUEST)
-            
+                return Response(
+                    {
+                        "error": (
+                            errors["customChallengeText"][0]
+                            if isinstance(errors["customChallengeText"], list)
+                            else str(errors["customChallengeText"])
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
 
         data = serializer.validated_data
@@ -91,6 +113,7 @@ def submission_list_create(request):
             status=status.HTTP_201_CREATED,
         )
 
+
 @api_view(["GET"])
 def submission_detail(request, pk):
     try:
@@ -99,6 +122,7 @@ def submission_detail(request, pk):
         return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
 
     return Response(submission.to_dict(), status=status.HTTP_200_OK)
+
 
 @api_view(["POST"])
 def submission_retry(request, pk):
@@ -116,9 +140,8 @@ def submission_retry(request, pk):
 
     dispatch_evaluation(submission)
 
-    return Response(
-        {"status": "retry dispatched", "id": str(submission.id)}, status=status.HTTP_200_OK
-    )
+    return Response({"status": "retry dispatched", "id": str(submission.id)}, status=status.HTTP_200_OK)
+
 
 @api_view(["POST"])
 def internal_evaluation_result(request):
@@ -165,6 +188,7 @@ def internal_evaluation_result(request):
         },
         status=status.HTTP_200_OK,
     )
+
 
 @api_view(["GET"])
 def internal_health(request):

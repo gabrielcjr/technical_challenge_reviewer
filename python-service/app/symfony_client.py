@@ -1,9 +1,12 @@
-import logging
+import fcntl
 import json
+import logging
 import pathlib
+from contextlib import contextmanager
 from dataclasses import dataclass
+
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log, retry_if_exception_type
+from tenacity import before_sleep_log, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .config import settings
 from .models import CallbackPayload
@@ -49,7 +52,9 @@ class EvaluationCallback:
 
 @retry(
     stop=stop_after_attempt(CALLBACK_RETRY_ATTEMPTS),
-    wait=wait_exponential(multiplier=CALLBACK_RETRY_MULTIPLIER, min=CALLBACK_RETRY_MIN_WAIT, max=CALLBACK_RETRY_MAX_WAIT),
+    wait=wait_exponential(
+        multiplier=CALLBACK_RETRY_MULTIPLIER, min=CALLBACK_RETRY_MIN_WAIT, max=CALLBACK_RETRY_MAX_WAIT
+    ),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
     reraise=True,
@@ -71,13 +76,15 @@ def _post_with_retry(url: str, payload: dict, token: str) -> httpx.Response:
 
 def _raise_for_server_errors(response: httpx.Response) -> None:
     if response.status_code >= SERVER_ERROR_THRESHOLD:
-        raise httpx.HTTPStatusError(
-            f"Server error {response.status_code}", request=response.request, response=response
-        )
+        raise httpx.HTTPStatusError(f"Server error {response.status_code}", request=response.request, response=response)
 
 
 def _resolve_callback_url(provided_url: str) -> str:
-    return provided_url or settings.callback_url or getattr(settings, "symfony_callback_url", "http://nginx/api/internal/evaluation-result")
+    return (
+        provided_url
+        or settings.callback_url
+        or getattr(settings, "symfony_callback_url", "http://nginx/api/internal/evaluation-result")
+    )
 
 
 def _resolve_callback_token(provided_token: str) -> str:
@@ -99,10 +106,6 @@ def _ensure_parent_exists(path: pathlib.Path) -> None:
         pass
 
 
-import fcntl
-from contextlib import contextmanager
-
-
 @contextmanager
 def _dlq_lock(log_path: pathlib.Path):
     lock_path = log_path.with_name(log_path.name + ".lock")
@@ -121,9 +124,7 @@ def _log_failed_callback(url: str, payload: dict, error: Exception) -> None:
         _ensure_parent_exists(log_file)
         with _dlq_lock(log_file):
             with log_file.open("a", encoding="utf-8") as file_handle:
-                file_handle.write(
-                    json.dumps({"url": url, "payload": payload, "error": str(error)}) + "\n"
-                )
+                file_handle.write(json.dumps({"url": url, "payload": payload, "error": str(error)}) + "\n")
         logger.info(f"Logged failed callback to {log_file}")
     except Exception as log_error:
         logger.error(f"Failed to log failed callback: {log_error}")

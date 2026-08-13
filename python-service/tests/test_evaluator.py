@@ -1,10 +1,13 @@
 import tempfile
 from pathlib import Path
+
 from app.evaluator import evaluate_repository
+
 
 def test_evaluate_repository_no_keys(monkeypatch):
     # Mock no LLM keys -> fallback path
     import app.config as config_module
+
     monkeypatch.setattr(config_module.settings, "groq_api_key", "gsk_test")
     monkeypatch.setattr(config_module.settings, "gemini_api_key", "test")
 
@@ -23,8 +26,10 @@ def test_evaluate_repository_no_keys(monkeypatch):
         assert result["approved"] is False or "LLM keys" in result["summary"]
         assert meta["total_files"] >= 1
 
+
 def test_evaluate_repository_empty_repo(monkeypatch):
     import app.config as config_module
+
     monkeypatch.setattr(config_module.settings, "groq_api_key", "gsk_test")
     monkeypatch.setattr(config_module.settings, "gemini_api_key", "test")
 

@@ -1,36 +1,77 @@
+import logging
 import os
 from pathlib import Path
-from typing import List, Tuple, Dict
-import logging
+from typing import Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
 # --- Constants with intention revealing names ---
 IGNORED_DIRECTORIES = {
-    ".git", "node_modules", "vendor", "__pycache__", ".venv", "venv",
-    "dist", "build", ".next", ".nuxt", "coverage", ".pytest_cache",
-    ".idea", ".vscode", "storage", "var", "tmp"
+    ".git",
+    "node_modules",
+    "vendor",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    "coverage",
+    ".pytest_cache",
+    ".idea",
+    ".vscode",
+    "storage",
+    "var",
+    "tmp",
 }
 
-IGNORED_FILE_NAMES = {
-    "package-lock.json", "yarn.lock", "composer.lock", "poetry.lock",
-    ".DS_Store", "thumbs.db"
-}
+IGNORED_FILE_NAMES = {"package-lock.json", "yarn.lock", "composer.lock", "poetry.lock", ".DS_Store", "thumbs.db"}
 
 RELEVANT_EXTENSIONS = {
-    ".md", ".txt", ".py", ".php", ".js", ".ts", ".jsx", ".tsx",
-    ".json", ".yaml", ".yml", ".html", ".css",
-    ".java", ".go", ".rs", ".rb", ".sh", ".sql", ".toml", ".ini",
+    ".md",
+    ".txt",
+    ".py",
+    ".php",
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".html",
+    ".css",
+    ".java",
+    ".go",
+    ".rs",
+    ".rb",
+    ".sh",
+    ".sql",
+    ".toml",
+    ".ini",
 }
 
 RELEVANT_EXACT_NAMES = {
-    ".env.example", "Dockerfile", ".gitignore", "Makefile", "makefile",
-    "composer.json", "package.json", "requirements.txt", "pyproject.toml",
-    "docker-compose.yml", "main.py", "app.py", "index.php",
+    ".env.example",
+    "Dockerfile",
+    ".gitignore",
+    "Makefile",
+    "makefile",
+    "composer.json",
+    "package.json",
+    "requirements.txt",
+    "pyproject.toml",
+    "docker-compose.yml",
+    "main.py",
+    "app.py",
+    "index.php",
 }
 
 PRIORITY_FILE_NAMES_LOWERCASE = {
-    "readme.md", "readme.txt", "readme",
+    "readme.md",
+    "readme.txt",
+    "readme",
 }
 
 MAX_FILE_SIZE_BYTES = 100 * 1024  # 100KB
@@ -68,10 +109,7 @@ def _is_in_ignored_directory(path: Path) -> bool:
 
 def _is_hidden_path_except_allowed(path: Path) -> bool:
     allowed_hidden = {".env.example"}
-    return any(
-        part.startswith(".") and part not in allowed_hidden
-        for part in path.parts
-    )
+    return any(part.startswith(".") and part not in allowed_hidden for part in path.parts)
 
 
 def is_relevant_for_evaluation(file_path: Path) -> bool:
@@ -94,10 +132,7 @@ def is_relevant_for_evaluation(file_path: Path) -> bool:
 
 def _filter_directories_in_place(directories: List[str]) -> None:
     """Modify dirs list in-place to skip ignored directories (os.walk contract)."""
-    directories[:] = [
-        d for d in directories
-        if d not in IGNORED_DIRECTORIES and not d.startswith(".")
-    ]
+    directories[:] = [d for d in directories if d not in IGNORED_DIRECTORIES and not d.startswith(".")]
 
 
 def _format_tree_entry(relative_root: str, name: str, is_directory: bool) -> str:
@@ -156,8 +191,7 @@ class _FileCollector:
         contents_str = self._build_contents_string()
         metadata = self._build_metadata()
         logger.info(
-            f"Collected {self.collected_count} files out of {len(self.all_files)} total, "
-            f"{self.total_chars} chars"
+            f"Collected {self.collected_count} files out of {len(self.all_files)} total, " f"{self.total_chars} chars"
         )
         return tree_str, contents_str, metadata
 
@@ -205,9 +239,7 @@ class _FileCollector:
     def _collect_single_file(self, file_path: Path, rel_path: Path) -> None:
         file_size = file_path.stat().st_size if file_path.exists() else 0
         if file_size > MAX_FILE_SIZE_BYTES:
-            self.content_entries.append(
-                f"\n--- File: {rel_path} (skipped, too large: {file_size} bytes) ---\n"
-            )
+            self.content_entries.append(f"\n--- File: {rel_path} (skipped, too large: {file_size} bytes) ---\n")
             return
 
         content = _read_file_safely(file_path)

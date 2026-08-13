@@ -1,5 +1,7 @@
 from rest_framework import serializers
-from .models import Challenge, Submission
+
+from .models import Challenge
+
 
 class ChallengeSerializer(serializers.ModelSerializer):
     class Meta:
@@ -23,6 +25,7 @@ class ChallengeSerializer(serializers.ModelSerializer):
         if len(value) < 20:
             raise serializers.ValidationError("description must be at least 20 characters")
         return value
+
 
 class SubmissionCreateSerializer(serializers.Serializer):
     userName = serializers.CharField(required=False, allow_blank=True)
@@ -56,13 +59,16 @@ class SubmissionCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError("Either challengeId or customChallengeText must be provided")
 
         if not challenge_id and len(custom_text) < 20:
-            raise serializers.ValidationError({"customChallengeText": "customChallengeText must be at least 20 characters long"})
+            raise serializers.ValidationError(
+                {"customChallengeText": "customChallengeText must be at least 20 characters long"}
+            )
 
         data["validated_user_name"] = user_name
         data["validated_github_url"] = github_url
         data["validated_challenge_id"] = challenge_id
         data["validated_custom_text"] = custom_text
         return data
+
 
 class EvaluationCallbackSerializer(serializers.Serializer):
     submissionId = serializers.CharField()

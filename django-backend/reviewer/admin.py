@@ -1,10 +1,13 @@
 from django.contrib import admin
+
 from .models import Challenge, Submission
+
 
 @admin.register(Challenge)
 class ChallengeAdmin(admin.ModelAdmin):
     list_display = ("id", "title", "created_at")
     search_fields = ("title", "description")
+
 
 @admin.register(Submission)
 class SubmissionAdmin(admin.ModelAdmin):

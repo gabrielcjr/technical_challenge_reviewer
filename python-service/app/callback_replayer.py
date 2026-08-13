@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import List
 
 from .config import settings
-from .symfony_client import _post_with_retry, _dlq_lock
+from .symfony_client import _dlq_lock, _post_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -104,11 +104,7 @@ def _read_entries(path: pathlib.Path) -> List[FailedCallbackEntry]:
 
 
 def _resolve_token(entry: FailedCallbackEntry) -> str:
-    return (
-        entry.payload.get("callbackToken")
-        or entry.payload.get("token")
-        or settings.callback_token
-    )
+    return entry.payload.get("callbackToken") or entry.payload.get("token") or settings.callback_token
 
 
 def _attempt_single_replay(entry: FailedCallbackEntry) -> bool:
@@ -118,9 +114,7 @@ def _attempt_single_replay(entry: FailedCallbackEntry) -> bool:
         logger.info(f"DLQ replay succeeded for submissionId={entry.submission_id}")
         return True
     except Exception as replay_error:
-        logger.warning(
-            f"DLQ replay still failing for {entry.submission_id}: {replay_error}"
-        )
+        logger.warning(f"DLQ replay still failing for {entry.submission_id}: {replay_error}")
         return False
 
 
@@ -183,9 +177,7 @@ def replay_failed_callbacks() -> ReplayResult:
     if succeeded == total:
         logger.info(f"DLQ replay complete: {succeeded}/{total} recovered, file cleared")
     else:
-        logger.info(
-            f"DLQ replay: {succeeded}/{total} recovered, {still_failing} still failing"
-        )
+        logger.info(f"DLQ replay: {succeeded}/{total} recovered, {still_failing} still failing")
 
     return ReplayResult(total=total, succeeded=succeeded, still_failing=still_failing)
 
@@ -193,9 +185,7 @@ def replay_failed_callbacks() -> ReplayResult:
 async def replay_loop(interval_seconds: int | None = None) -> None:
     interval = interval_seconds or settings.callback_replay_interval_seconds
     path = get_failed_path()
-    logger.info(
-        f"Starting callback replay loop every {interval}s (path={path})"
-    )
+    logger.info(f"Starting callback replay loop every {interval}s (path={path})")
     while True:
         try:
             await asyncio.to_thread(replay_failed_callbacks)

@@ -1,8 +1,10 @@
 import uuid
+
 from django.db import models
 from django.utils import timezone
 
 MAX_LOG_LENGTH = 10000
+
 
 class SubmissionStatus(models.TextChoices):
     PENDING = "pending", "Pending"
@@ -10,6 +12,7 @@ class SubmissionStatus(models.TextChoices):
     APPROVED = "approved", "Approved"
     REJECTED = "rejected", "Rejected"
     FAILED = "failed", "Failed"
+
 
 class Challenge(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -32,6 +35,7 @@ class Challenge(models.Model):
             "createdAt": self.created_at.isoformat(),
         }
 
+
 class Submission(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_name = models.CharField(max_length=180)
@@ -40,9 +44,7 @@ class Submission(models.Model):
         Challenge, on_delete=models.SET_NULL, null=True, blank=True, related_name="submissions"
     )
     challenge_snapshot = models.TextField()
-    status = models.CharField(
-        max_length=30, choices=SubmissionStatus.choices, default=SubmissionStatus.PENDING
-    )
+    status = models.CharField(max_length=30, choices=SubmissionStatus.choices, default=SubmissionStatus.PENDING)
     evaluation_result = models.JSONField(null=True, blank=True)
     approved = models.BooleanField(null=True, blank=True)
     processing_logs = models.TextField(null=True, blank=True)
@@ -89,9 +91,7 @@ class Submission(models.Model):
         if failed:
             self.status = SubmissionStatus.FAILED
             self.approved = False
-            self.append_processing_log(
-                f"Evaluation failed (infrastructure/process error): status={self.status}"
-            )
+            self.append_processing_log(f"Evaluation failed (infrastructure/process error): status={self.status}")
             return
 
         self.status = SubmissionStatus.APPROVED if approved else SubmissionStatus.REJECTED

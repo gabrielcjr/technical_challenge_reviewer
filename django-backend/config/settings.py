@@ -1,6 +1,7 @@
 import os
 import secrets
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -64,6 +65,7 @@ USE_SQLITE = os.environ.get("USE_SQLITE", "False").lower() in ("true", "1", "t")
 
 if DATABASE_URL and not USE_SQLITE:
     import urllib.parse
+
     url = urllib.parse.urlparse(DATABASE_URL)
     DATABASES = {
         "default": {
@@ -122,7 +124,11 @@ REST_FRAMEWORK = {
 # Custom Service Environment Variables
 CALLBACK_TOKEN = os.environ.get("CALLBACK_TOKEN", "default_secret_callback_token_123")
 PYTHON_EVALUATOR_URL = os.environ.get("PYTHON_EVALUATOR_URL", "http://python-evaluator:8000")
-SYMFONY_CALLBACK_URL = os.environ.get("SYMFONY_CALLBACK_URL") or os.environ.get("DJANGO_CALLBACK_URL") or "http://nginx/api/internal/evaluation-result"
+SYMFONY_CALLBACK_URL = (
+    os.environ.get("SYMFONY_CALLBACK_URL")
+    or os.environ.get("DJANGO_CALLBACK_URL")
+    or "http://nginx/api/internal/evaluation-result"
+)
 
 # Security Headers (Enforcing mandatory secure coding rules)
 SECURE_CONTENT_TYPE_NOSNIFF = True

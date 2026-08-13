@@ -1,9 +1,9 @@
 import json
 import logging
 import re
-from typing import Dict, Any, Tuple, List
+from typing import Any, Dict, List, Tuple
 
-from .config import settings, SENTINEL_TEST_TOKENS
+from .config import SENTINEL_TEST_TOKENS, settings
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,9 @@ def _determine_providers_to_try() -> List[str]:
     return ordered
 
 
-def _try_providers_in_sequence(providers: List[str], prompt: str) -> Tuple[Tuple[Dict[str, Any], str] | None, Exception | None]:
+def _try_providers_in_sequence(
+    providers: List[str], prompt: str
+) -> Tuple[Tuple[Dict[str, Any], str] | None, Exception | None]:
     last_error: Exception | None = None
 
     for provider_name in providers:
@@ -248,10 +250,7 @@ def _build_heuristic_fallback_result(
             "Configure GROQ_API_KEY (Groq, free) or GEMINI_API_KEY in .env to enable AI evaluation",
             "Once keys are set, re-run evaluation via retry button",
         ]
-        reasoning = (
-            f"No LLM provider available. Last error: {last_error}. "
-            "Set API keys to enable evaluation."
-        )
+        reasoning = f"No LLM provider available. Last error: {last_error}. " "Set API keys to enable evaluation."
     else:
         summary = (
             "All LLM providers failed - evaluation used heuristic fallback. "

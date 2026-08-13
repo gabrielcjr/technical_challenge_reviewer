@@ -1,10 +1,13 @@
 import logging
 import threading
+
 import httpx
 from django.conf import settings
-from .models import Submission, SubmissionStatus
+
+from .models import Submission
 
 logger = logging.getLogger(__name__)
+
 
 def dispatch_evaluation(submission: Submission) -> None:
     """
@@ -27,7 +30,9 @@ def dispatch_evaluation(submission: Submission) -> None:
             "Content-Type": "application/json",
             "X-Internal-Token": getattr(settings, "CALLBACK_TOKEN", "default_secret_callback_token_123"),
         }
-        evaluator_url = getattr(settings, "PYTHON_EVALUATOR_URL", "http://python-evaluator:8000").rstrip("/") + "/evaluate"
+        evaluator_url = (
+            getattr(settings, "PYTHON_EVALUATOR_URL", "http://python-evaluator:8000").rstrip("/") + "/evaluate"
+        )
 
         try:
             logger.info(f"Posting evaluation request to {evaluator_url} for submission {submission.id}")

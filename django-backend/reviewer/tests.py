@@ -1,7 +1,8 @@
 import json
-from django.test import TestCase, Client
-from django.urls import reverse
-from reviewer.models import Challenge, Submission, SubmissionStatus
+
+from django.test import Client, TestCase
+from reviewer.models import Submission, SubmissionStatus
+
 
 class ReviewerApiTestCase(TestCase):
     def setUp(self):
@@ -106,6 +107,7 @@ class ReviewerApiTestCase(TestCase):
         self.assertEqual(response.status_code, 401)
 
         from django.conf import settings
+
         token = getattr(settings, "CALLBACK_TOKEN", "default_secret_callback_token_123")
 
         # Authorized attempt
