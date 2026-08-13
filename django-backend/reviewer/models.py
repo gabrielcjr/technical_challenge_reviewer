@@ -36,6 +36,20 @@ class Challenge(models.Model):
         }
 
 
+class SafeJSONField(models.JSONField):
+    def from_db_value(self, value, expression, connection):
+        if value is None:
+            return value
+        if isinstance(value, (dict, list)):
+            return value
+        try:
+            return super().from_db_value(value, expression, connection)
+        except TypeError:
+            if isinstance(value, (dict, list)):
+                return value
+            raise
+
+
 class Submission(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_name = models.CharField(max_length=180)
@@ -45,7 +59,7 @@ class Submission(models.Model):
     )
     challenge_snapshot = models.TextField()
     status = models.CharField(max_length=30, choices=SubmissionStatus.choices, default=SubmissionStatus.PENDING)
-    evaluation_result = models.JSONField(null=True, blank=True)
+    evaluation_result = SafeJSONField(null=True, blank=True)
     approved = models.BooleanField(null=True, blank=True)
     processing_logs = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
