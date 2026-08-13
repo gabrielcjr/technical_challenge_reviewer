@@ -9,14 +9,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR.parent / ".env")
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY") or os.environ.get("SECRET_KEY")
-if not SECRET_KEY:
-    # Security requirement: generate ephemeral key if not supplied and warn
-    SECRET_KEY = secrets.token_hex(32)
+SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-key-change-in-production")
 
-DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "t")
+DEBUG = True if os.environ.get("DEBUG", "False") == "True" else False
 
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
+ALLOWED_HOSTS = [os.environ.get("ALLOWED_HOSTS", "*")]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -130,6 +127,10 @@ SYMFONY_CALLBACK_URL = (
     or "http://nginx/api/internal/evaluation-result"
 )
 
-# Security Headers (Enforcing mandatory secure coding rules)
+# Security Headers & Cookies (Enforcing mandatory secure coding rules)
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "SAMEORIGIN"
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
