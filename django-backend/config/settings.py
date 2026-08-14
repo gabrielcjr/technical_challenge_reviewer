@@ -119,10 +119,9 @@ REST_FRAMEWORK = {
 
 # Custom Service Environment Variables
 CALLBACK_TOKEN = os.environ.get("CALLBACK_TOKEN", "default_secret_callback_token_123")
-PYTHON_EVALUATOR_URL = os.environ.get("PYTHON_EVALUATOR_URL", "http://python-evaluator:8000")
-SYMFONY_CALLBACK_URL = (
-    os.environ.get("SYMFONY_CALLBACK_URL")
-    or os.environ.get("DJANGO_CALLBACK_URL")
+EVALUATOR_SERVICE_URL = os.environ.get("EVALUATOR_SERVICE_URL", "http://evaluator:8000")
+WEBHOOK_CALLBACK_URL = (
+    os.environ.get("WEBHOOK_CALLBACK_URL")
     or "http://nginx/api/internal/evaluation-result"
 )
 

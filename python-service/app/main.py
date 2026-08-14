@@ -16,10 +16,10 @@ from .config import settings
 from .evaluator import evaluate_repository
 from .models import EvaluateRequest, HealthResponse
 from .repo_cloner import cleanup_stale_clone_directories, cloned_repo, validate_github_url
-from .symfony_client import EvaluationCallback, send_evaluation_callback
+from .webhook_client import EvaluationCallback, send_evaluation_callback
 
 # --- Constants ---
-# Keep aligned with Symfony Submission challengeSnapshot min length (20).
+# Keep aligned with Orchestrator Submission challengeSnapshot min length (20).
 MIN_CHALLENGE_TEXT_LENGTH = 20
 RAW_OUTPUT_TRUNCATION_LENGTH = 2000
 ERROR_SUMMARY_TRUNCATION_LENGTH = 200
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
             logger.info(f"Cleaned up {cleaned} stale clone folders on startup")
     except Exception as cleanup_err:
         logger.warning(f"Startup clone directory cleanup warning: {cleanup_err}")
-    # Start DLQ replay cron - guarantees no feedback lost if Symfony was down
+    # Start DLQ replay cron - guarantees no feedback lost if Orchestrator was down
     task = asyncio.create_task(replay_loop())
     logger.info("Callback replay cron started")
     try:
@@ -204,7 +204,7 @@ def _send_failure_callback(task: EvaluationTask, error: Exception) -> None:
 @app.post("/evaluate", status_code=202, dependencies=[Depends(verify_internal_token)])
 async def evaluate(request: EvaluateRequest, background_tasks: BackgroundTasks):
     """
-    Receives evaluation request from Symfony.
+    Receives evaluation request from Orchestrator.
     Returns 202 immediately and processes in background.
     """
     logger.info(f"Received evaluation request: submissionId={request.submission_id}, repo={request.github_repo_url}")

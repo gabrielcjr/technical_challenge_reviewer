@@ -47,7 +47,7 @@ class EvaluationCallback:
             callbackToken=token,
             failed=self.failed,
         )
-        return payload.to_symfony_dict()
+        return payload.to_webhook_dict()
 
 
 @retry(
@@ -82,8 +82,7 @@ def _raise_for_server_errors(response: httpx.Response) -> None:
 def _resolve_callback_url(provided_url: str) -> str:
     return (
         provided_url
-        or settings.callback_url
-        or getattr(settings, "symfony_callback_url", "http://nginx/api/internal/evaluation-result")
+        or getattr(settings, "webhook_callback_url", "http://nginx/api/internal/evaluation-result")
     )
 
 
@@ -162,7 +161,7 @@ def send_evaluation_callback(
     evaluation_callback: EvaluationCallback,
 ) -> bool:
     """
-    Send evaluation result back to Symfony with retry logic.
+    Send evaluation result back to Orchestrator with retry logic.
     Returns True on success, False on failure after retries.
     """
     resolved_url = _resolve_callback_url(callback_url)

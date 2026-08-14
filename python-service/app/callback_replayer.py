@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import List
 
 from .config import settings
-from .symfony_client import _dlq_lock, _post_with_retry
+from .webhook_client import _dlq_lock, _post_with_retry
 
 logger = logging.getLogger(__name__)
 
