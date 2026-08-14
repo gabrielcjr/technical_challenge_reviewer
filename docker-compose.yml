@@ -39,8 +39,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       CALLBACK_TOKEN: ${CALLBACK_TOKEN}
-      PYTHON_EVALUATOR_URL: http://python-evaluator:8000
-      DJANGO_CALLBACK_URL: http://nginx/api/internal/evaluation-result
+      EVALUATOR_SERVICE_URL: http://evaluator:8000
+      WEBHOOK_CALLBACK_URL: http://nginx/api/internal/evaluation-result
     networks:
       - app-network
 
@@ -49,7 +49,7 @@ services:
     container_name: challenge_nginx
     restart: unless-stopped
     ports:
-      - "${SYMFONY_PORT:-8080}:80"
+      - "${API_PORT:-8080}:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
@@ -57,11 +57,11 @@ services:
     networks:
       - app-network
 
-  python-evaluator:
+  evaluator:
     build:
       context: ./python-service
       dockerfile: Dockerfile
-    container_name: challenge_python
+    container_name: challenge_evaluator
     restart: unless-stopped
     ports:
       - "${EVALUATOR_PORT:-8001}:8000"
@@ -74,8 +74,7 @@ services:
       GROQ_API_KEY: ${GROQ_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       LLM_PROVIDER: ${LLM_PROVIDER:-auto}
-      DJANGO_CALLBACK_URL: ${DJANGO_CALLBACK_URL:-http://nginx/api/internal/evaluation-result}
-      SYMFONY_CALLBACK_URL: ${SYMFONY_CALLBACK_URL:-http://nginx/api/internal/evaluation-result}
+      WEBHOOK_CALLBACK_URL: ${WEBHOOK_CALLBACK_URL:-http://nginx/api/internal/evaluation-result}
       CALLBACK_TOKEN: ${CALLBACK_TOKEN}
       PYTHONUNBUFFERED: 1
     depends_on:
@@ -102,8 +101,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       CALLBACK_TOKEN: ${CALLBACK_TOKEN}
-      PYTHON_EVALUATOR_URL: http://python-evaluator:8000
-      DJANGO_CALLBACK_URL: http://nginx/api/internal/evaluation-result
+      EVALUATOR_SERVICE_URL: http://evaluator:8000
+      WEBHOOK_CALLBACK_URL: http://nginx/api/internal/evaluation-result
     command: ["sh", "-c", "python manage.py run_worker"]
     networks:
       - app-network

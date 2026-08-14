@@ -1,5 +1,5 @@
 import respx
-from app.symfony_client import send_callback
+from app.webhook_client import send_callback
 from httpx import Response
 
 
@@ -41,14 +41,14 @@ def test_callback_failure_retries():
 
 def test_callback_payload_structure():
     # Ensure payload contains required fields
-    import app.symfony_client as client_module
+    import app.webhook_client as client_module
 
     # We can't easily intercept payload without mocking _post_with_retry, but test that function exists
     assert hasattr(client_module, "send_callback")
 
 
 def test_evaluation_callback_includes_failed_flag():
-    from app.symfony_client import EvaluationCallback
+    from app.webhook_client import EvaluationCallback
 
     callback = EvaluationCallback(
         submission_id="sub-1",

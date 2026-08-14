@@ -3,6 +3,7 @@
 .venv/
 *.venv
 venv/
+venv_django/
 
 # Python
 __pycache__/

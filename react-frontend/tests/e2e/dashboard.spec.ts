@@ -8,8 +8,8 @@ test.describe('Dashboard Page', () => {
     await expect(page).toHaveTitle(/ChallengeReviewer/i);
 
     // Wait for data to load
-    await expect(page.locator('text=Challenges')).toBeVisible();
-    await expect(page.locator('text=Recent Submissions')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Challenges' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Recent Submissions' })).toBeVisible();
 
     // Verify navigation links
     await expect(page.getByRole('link', { name: 'New Challenge', exact: true })).toBeVisible();

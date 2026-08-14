@@ -8,10 +8,10 @@ class EvaluateRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    submission_id: str = Field(..., alias="submissionId", description="UUID of submission in Symfony")
+    submission_id: str = Field(..., alias="submissionId", description="UUID of submission in orchestrator")
     github_repo_url: str = Field(..., alias="githubRepoUrl", description="GitHub repo URL")
     challenge_text: str = Field(..., alias="challengeText", description="Challenge requirements text")
-    callback_url: str = Field(..., alias="callbackUrl", description="Symfony callback URL")
+    callback_url: str = Field(..., alias="callbackUrl", description="Webhook callback URL")
     callback_token: str = Field(..., alias="callbackToken", description="Shared token for callback auth")
 
 
@@ -24,7 +24,7 @@ class EvaluationResult(BaseModel):
 
 
 class CallbackPayload(BaseModel):
-    """Callback sent to Symfony - uses Symfony-expected camelCase keys."""
+    """Callback sent to Orchestrator - uses orchestrator-expected camelCase keys."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -39,7 +39,7 @@ class CallbackPayload(BaseModel):
     # False for normal evaluation outcomes (approved / rejected).
     failed: bool = False
 
-    def to_symfony_dict(self) -> dict:
+    def to_webhook_dict(self) -> dict:
         return self.model_dump(by_alias=True)
 
 

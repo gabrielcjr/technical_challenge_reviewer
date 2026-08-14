@@ -87,12 +87,12 @@ def test_get_failed_path_uses_config():
 def test_concurrent_dlq_locking(tmp_path):
     import threading
 
-    from app.symfony_client import _log_failed_callback
+    from app.webhook_client import _log_failed_callback
 
     dlq = tmp_path / "failed.jsonl"
     with (
         patch("app.callback_replayer.get_failed_path", return_value=dlq),
-        patch("app.symfony_client._get_failed_path", return_value=dlq),
+        patch("app.webhook_client._get_failed_path", return_value=dlq),
         patch("app.callback_replayer._post_with_retry", return_value=MagicMock()),
     ):
 

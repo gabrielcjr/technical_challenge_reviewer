@@ -17,7 +17,7 @@ A distributed asynchronous system that ingests GitHub repository submissions and
 The application is split into three primary services behind an **Nginx** reverse proxy:
 1. **React SPA Frontend**: A modern client-side application built with Vite and Tailwind CSS v4.
 2. **Django API (Python 3.12)**: A pure JSON REST API for challenge definition, submission intake, persistent database state, and background queue workers.
-3. **Evaluator Microservice (Python 3.12)**: A FastAPI service that clones repositories, collects source files, calls LangChain-based LLM APIs, and reports results via authenticated webhooks.
+3. **Evaluator Microservice (`evaluator-service/`)**: A FastAPI service that clones repositories, collects source files, calls LangChain-based LLM APIs, and reports results via authenticated webhooks.
 
 ```mermaid
 sequenceDiagram
@@ -98,12 +98,12 @@ sequenceDiagram
 *   `reviewer/utils.py` — Async HTTP evaluator dispatch utility.
 *   `reviewer/management/commands/run_worker.py` — Background queue worker command.
 
-### Python Evaluator (`python-service/app/`)
+### Evaluator Microservice (`evaluator-service/`)
 *   `main.py` — FastAPI routes: `/evaluate`, `/health`, DLQ admin endpoints.
 *   `evaluator.py` — Orchestrates clone metadata, file collection, and LLM evaluation.
 *   `llm_provider.py` — Groq → Gemini fallback and heuristic degraded mode.
 *   `file_collector.py` — Collects relevant source files, skips binaries/vendor dirs, truncates payload size.
-*   `symfony_client.py` — HTTP callback client with Tenacity retries and DLQ logging.
+*   `webhook_client.py` — HTTP callback client with Tenacity retries and DLQ logging.
 *   `callback_replayer.py` — Periodic DLQ redelivery loop.
 
 ---
@@ -162,12 +162,8 @@ docker compose exec django python manage.py test
 
 ### FastAPI (Pytest)
 ```bash
-docker compose exec python-evaluator pytest -v
-```
-
-### Run all backend tests
-```bash
-make test
+3.  `make test-evaluator` - Run Evaluator API tests
+4.  `make test-django` - Run Orchestrator API tests
 ```
 
 ---

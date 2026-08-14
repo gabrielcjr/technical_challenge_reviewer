@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 def dispatch_evaluation(submission: Submission) -> None:
     """
-    Dispatches evaluation request to the FastAPI evaluator microservice.
+    Dispatches evaluation request to the evaluator microservice.
     Runs asynchronously in a daemon thread so API responses return immediately.
     """
     submission.mark_as_processing()
@@ -23,16 +23,14 @@ def dispatch_evaluation(submission: Submission) -> None:
             "submissionId": str(submission.id),
             "githubRepoUrl": submission.github_repo_url,
             "challengeText": submission.challenge_snapshot,
-            "callbackUrl": getattr(settings, "SYMFONY_CALLBACK_URL", "http://nginx/api/internal/evaluation-result"),
+            "callbackUrl": getattr(settings, "WEBHOOK_CALLBACK_URL", "http://nginx/api/internal/evaluation-result"),
             "callbackToken": getattr(settings, "CALLBACK_TOKEN", "default_secret_callback_token_123"),
         }
         headers = {
             "Content-Type": "application/json",
             "X-Internal-Token": getattr(settings, "CALLBACK_TOKEN", "default_secret_callback_token_123"),
         }
-        evaluator_url = (
-            getattr(settings, "PYTHON_EVALUATOR_URL", "http://python-evaluator:8000").rstrip("/") + "/evaluate"
-        )
+        evaluator_url = getattr(settings, "EVALUATOR_SERVICE_URL", "http://evaluator:8000").rstrip("/") + "/evaluate"
 
         try:
             logger.info(f"Posting evaluation request to {evaluator_url} for submission {submission.id}")

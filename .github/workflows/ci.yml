@@ -36,8 +36,8 @@ jobs:
           DATABASE_URL=postgresql://app:app@database:5432/challenge_reviewer
           DJANGO_SECRET_KEY=test_random_secret_for_ci_32_chars_long
           SYMFONY_PORT=8080
-          PYTHON_EVALUATOR_URL=http://python-evaluator:8000
-          DJANGO_CALLBACK_URL=http://nginx/api/internal/evaluation-result
+          EVALUATOR_SERVICE_URL=http://evaluator:8000
+          WEBHOOK_CALLBACK_URL=http://nginx/api/internal/evaluation-result
           CALLBACK_TOKEN=s3cr3t_shared_token_change_me
           EVALUATOR_PORT=8001
           GROQ_API_KEY=dummy_key_for_ci
@@ -76,7 +76,7 @@ jobs:
 
       - name: Start all services
         run: |
-          docker compose up -d django nginx python-evaluator django-worker frontend
+          docker compose up -d django nginx evaluator django-worker frontend
           docker compose ps
           # Give services a moment to initialize
           sleep 10
@@ -91,8 +91,8 @@ jobs:
 
       - name: Run Python evaluator tests
         run: |
-          docker compose exec -T python-evaluator pytest -v --color=yes
-          docker compose exec -T python-evaluator python -m py_compile app/*.py || true
+          docker compose exec -T evaluator pytest -v --color=yes
+          docker compose exec -T evaluator python -m py_compile app/*.py || true
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -125,8 +125,8 @@ jobs:
           echo "=== Django health ==="
           docker compose exec -T django python manage.py check || true
           echo "=== Python health check ==="
-          curl -sf http://localhost:8001/health || docker compose exec -T python-evaluator curl -sf http://localhost:8000/health || echo "health endpoint not reachable via localhost, checking inside network"
-          docker compose exec -T python-evaluator python -c "import app.main; print('FastAPI app import OK')" || true
+          curl -sf http://localhost:8001/health || docker compose exec -T evaluator curl -sf http://localhost:8000/health || echo "health endpoint not reachable via localhost, checking inside network"
+          docker compose exec -T evaluator python -c "import app.main; print('FastAPI app import OK')" || true
 
       - name: Show logs on failure
         if: failure()
@@ -137,8 +137,8 @@ jobs:
           docker compose logs --tail=200 django || true
           echo "=== nginx logs ==="
           docker compose logs --tail=200 nginx || true
-          echo "=== python-evaluator logs ==="
-          docker compose logs --tail=200 python-evaluator || true
+          echo "=== evaluator logs ==="
+          docker compose logs --tail=200 evaluator || true
           echo "=== django-worker logs ==="
           docker compose logs --tail=200 django-worker || true
 
