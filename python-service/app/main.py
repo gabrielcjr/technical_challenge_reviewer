@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -6,12 +5,6 @@ from dataclasses import dataclass
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 
-from .callback_replayer import (
-    get_failed_callbacks_count,
-    get_failed_path,
-    replay_failed_callbacks,
-    replay_loop,
-)
 from .config import settings
 from .evaluator import evaluate_repository
 from .models import EvaluateRequest, HealthResponse
@@ -52,17 +45,7 @@ async def lifespan(app: FastAPI):
             logger.info(f"Cleaned up {cleaned} stale clone folders on startup")
     except Exception as cleanup_err:
         logger.warning(f"Startup clone directory cleanup warning: {cleanup_err}")
-    # Start DLQ replay cron - guarantees no feedback lost if Orchestrator was down
-    task = asyncio.create_task(replay_loop())
-    logger.info("Callback replay cron started")
-    try:
-        yield
-    finally:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            logger.info("Callback replay cron stopped")
+    yield
 
 
 app = FastAPI(
@@ -101,23 +84,6 @@ async def health_check() -> HealthResponse:
 @app.get("/")
 async def root():
     return {"message": "Challenge Evaluator API", "docs": "/docs", "health": "/health"}
-
-
-@app.get("/admin/replay-status", dependencies=[Depends(verify_internal_token)])
-async def replay_status():
-    count = await asyncio.to_thread(get_failed_callbacks_count)
-    path = get_failed_path()
-    return {
-        "failed_callbacks": count,
-        "path": str(path),
-        "replay_interval": settings.callback_replay_interval_seconds,
-    }
-
-
-@app.post("/admin/replay-failed-callbacks", dependencies=[Depends(verify_internal_token)])
-async def replay_failed():
-    result = await asyncio.to_thread(replay_failed_callbacks)
-    return result.to_dict()
 
 
 # --- Background Task Decomposition ---

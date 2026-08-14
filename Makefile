@@ -41,7 +41,7 @@ makemigrations:
 	docker compose exec django python manage.py makemigrations
 
 worker-logs:
-	docker compose logs -f django-worker
+	docker compose logs -f celery-worker
 
 test-django:
 	docker compose exec django python manage.py test

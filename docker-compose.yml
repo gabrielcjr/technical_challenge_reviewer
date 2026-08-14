@@ -41,6 +41,7 @@ services:
       CALLBACK_TOKEN: ${CALLBACK_TOKEN}
       EVALUATOR_SERVICE_URL: http://evaluator:8000
       WEBHOOK_CALLBACK_URL: http://nginx/api/internal/evaluation-result
+      CELERY_BROKER_URL: redis://redis:6379/0
     networks:
       - app-network
 
@@ -76,13 +77,37 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-auto}
       WEBHOOK_CALLBACK_URL: ${WEBHOOK_CALLBACK_URL:-http://nginx/api/internal/evaluation-result}
       CALLBACK_TOKEN: ${CALLBACK_TOKEN}
+      CELERY_BROKER_URL: redis://redis:6379/0
       PYTHONUNBUFFERED: 1
     depends_on:
       - nginx
     networks:
       - app-network
 
-  django-worker:
+  evaluator-worker:
+    build:
+      context: ./python-service
+      dockerfile: Dockerfile
+    container_name: challenge_evaluator_worker
+    restart: unless-stopped
+    command: ["sh", "-c", "celery -A app.celery_app worker -Q evaluator_queue -l info"]
+    volumes:
+      - ./python-service/app:/app/app
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      PYTHONUNBUFFERED: 1
+    depends_on:
+      redis:
+        condition: service_started
+      evaluator:
+        condition: service_started
+    networks:
+      - app-network
+
+  celery-worker:
     build:
       context: ./django-backend
       dockerfile: Dockerfile
@@ -93,6 +118,8 @@ services:
     depends_on:
       database:
         condition: service_healthy
+      redis:
+        condition: service_started
       django:
         condition: service_started
     env_file:
@@ -103,7 +130,8 @@ services:
       CALLBACK_TOKEN: ${CALLBACK_TOKEN}
       EVALUATOR_SERVICE_URL: http://evaluator:8000
       WEBHOOK_CALLBACK_URL: http://nginx/api/internal/evaluation-result
-    command: ["sh", "-c", "python manage.py run_worker"]
+      CELERY_BROKER_URL: redis://redis:6379/0
+    command: ["sh", "-c", "celery -A config worker -Q django_queue -l info"]
     networks:
       - app-network
 
@@ -118,6 +146,15 @@ services:
     volumes:
       - ./react-frontend:/app
       - /app/node_modules
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: challenge_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
     networks:
       - app-network
 
