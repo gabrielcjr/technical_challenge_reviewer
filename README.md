@@ -25,7 +25,7 @@ sequenceDiagram
     actor User as Developer / Candidate
     participant SPA as React Frontend
     participant Django as Django Backend (API & DB)
-    participant Worker as Django Worker (Queue Consumer)
+    participant Celery as Celery Worker (Redis Queue)
     participant Evaluator as FastAPI Evaluator Microservice
     participant LLM as LLM API (Groq / Gemini)
 
@@ -35,10 +35,10 @@ sequenceDiagram
     Django-->>SPA: HTTP 201 (Submission ID & checkUrl)
 
     loop Background Consumption
-        Worker->>Django: Pick up PENDING submission
-        Worker->>Evaluator: POST /evaluate (X-Internal-Token + payload)
+        Celery->>Django: Pick up PENDING submission task
+        Celery->>Evaluator: POST /evaluate (X-Internal-Token + payload)
     end
-    Evaluator-->>Worker: HTTP 202 Accepted (Background task started)
+    Evaluator-->>Celery: HTTP 202 Accepted (Background task started)
 
     activate Evaluator
     Evaluator->>LLM: Git clone & analyze repo context
@@ -72,9 +72,10 @@ sequenceDiagram
 - **Heuristic Degraded Mode**: If API keys are missing **or** all providers fail, the evaluator returns a deterministic non-crashing fallback result so the queue stays unblocked.
 - **Robust JSON Extraction**: Regex-based pre-processing extracts clean JSON even when models wrap output in markdown fences or conversational text.
 
-### 2. Message-Driven Queue (Django Worker)
-- **Persist-then-dispatch**: Submissions are saved to PostgreSQL with status `pending`, then processed asynchronously by background worker threads / management command `run_worker`.
-- **Fail-safe Retries**: Allows retry of failed/stuck evaluations cleanly via `/api/submissions/{id}/retry`.
+### 2. Message-Driven Queue (Celery & Redis)
+- **Persist-then-dispatch**: Submissions are saved to PostgreSQL with status `pending`, then processed asynchronously via **Celery** workers backed by a **Redis** message broker.
+- **Fail-safe Retries**: If the evaluator microservice is down, Celery automatically retries tasks with exponential backoff (up to hours of tolerance), ensuring no submissions are lost.
+- **Manual Retries**: Allows manual retry of failed/stuck evaluations cleanly via `/api/submissions/{id}/retry`.
 
 ### 3. Fail-Safe Webhooks (DLQ & Cron Replay)
 - **Async execution**: FastAPI returns `202 Accepted` and runs clone + LLM work in a `BackgroundTask`.
@@ -95,16 +96,15 @@ sequenceDiagram
 ### Django API (`django-backend/`)
 *   `reviewer/models.py` — Challenge and Submission ORM models with domain state transition logic.
 *   `reviewer/views.py` — REST API endpoints for frontend and internal evaluation webhook callbacks.
-*   `reviewer/utils.py` — Async HTTP evaluator dispatch utility.
-*   `reviewer/management/commands/run_worker.py` — Background queue worker command.
+*   `reviewer/tasks.py` — Celery `@shared_task` for executing webhook calls with `autoretry_for` failure handling.
+*   `reviewer/utils.py` — Async Celery dispatcher wrapper.
 
 ### Evaluator Microservice (`evaluator-service/`)
 *   `main.py` — FastAPI routes: `/evaluate`, `/health`, DLQ admin endpoints.
 *   `evaluator.py` — Orchestrates clone metadata, file collection, and LLM evaluation.
 *   `llm_provider.py` — Groq → Gemini fallback and heuristic degraded mode.
 *   `file_collector.py` — Collects relevant source files, skips binaries/vendor dirs, truncates payload size.
-*   `webhook_client.py` — HTTP callback client with Tenacity retries and DLQ logging.
-*   `callback_replayer.py` — Periodic DLQ redelivery loop.
+*   `webhook_client.py` — HTTP callback client enqueuing messages to Celery.
 
 ---
 
@@ -114,8 +114,8 @@ sequenceDiagram
 | :--- | :--- | :--- |
 | **Frontend SPA** | React 19 (Vite) | Tailwind v4, Playwright E2E, Vitest |
 | **Orchestration & API** | Django 5.1 (Python 3.12) | DRF Serializers, ORM Models, Admin Panel |
-| **Worker Queue** | Django Management Worker | Asynchronous HTTP dispatching, state machine |
-| **Microservice Backend** | FastAPI (Python 3.12) | BackgroundTasks, lifespan hooks, admin DLQ endpoints |
+| **Worker Queue** | Celery & Redis | Distributed asynchronous dispatching, exponential backoff retries |
+| **Microservice Backend** | FastAPI (Python 3.12) | BackgroundTasks, lifespan hooks |
 | **AI Integration** | LangChain | Prompt templates, multi-provider clients, JSON extraction |
 | **Database** | PostgreSQL 17 | UUID identifiers, relational schemas |
 | **Infrastructure** | Docker Compose, Nginx | Multi-container composition, reverse proxy |

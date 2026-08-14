@@ -1,32 +1,20 @@
-import fcntl
-import json
 import logging
-import pathlib
-from contextlib import contextmanager
 from dataclasses import dataclass
 
 import httpx
-from tenacity import before_sleep_log, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from .celery_app import celery_app
 from .config import settings
 from .models import CallbackPayload
 
 logger = logging.getLogger(__name__)
 
-# Constants - intention revealing names
-CALLBACK_RETRY_ATTEMPTS = 5
-CALLBACK_RETRY_MIN_WAIT = 2
-CALLBACK_RETRY_MAX_WAIT = 30
-CALLBACK_RETRY_MULTIPLIER = 1
 HTTP_TIMEOUT_SECONDS = 15.0
-SERVER_ERROR_THRESHOLD = 500
-FAILED_CALLBACKS_LOG_PATH = "/tmp/failed_callbacks.jsonl"
-RESPONSE_PREVIEW_LENGTH = 200
 
 
 @dataclass(frozen=True)
 class EvaluationCallback:
-    """Value object representing callback data - replaces 8-arg function."""
+    """Value object representing callback data."""
 
     submission_id: str
     approved: bool
@@ -50,16 +38,22 @@ class EvaluationCallback:
         return payload.to_webhook_dict()
 
 
-@retry(
-    stop=stop_after_attempt(CALLBACK_RETRY_ATTEMPTS),
-    wait=wait_exponential(
-        multiplier=CALLBACK_RETRY_MULTIPLIER, min=CALLBACK_RETRY_MIN_WAIT, max=CALLBACK_RETRY_MAX_WAIT
-    ),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-    retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
-    reraise=True,
+def _resolve_callback_url(provided_url: str) -> str:
+    return provided_url or getattr(settings, "webhook_callback_url", "http://nginx/api/internal/evaluation-result")
+
+
+def _resolve_callback_token(provided_token: str) -> str:
+    return provided_token or settings.callback_token
+
+
+@celery_app.task(
+    bind=True,
+    autoretry_for=(httpx.RequestError, httpx.HTTPStatusError),
+    retry_backoff=True,
+    retry_backoff_max=3600,
+    max_retries=10,
 )
-def _post_with_retry(url: str, payload: dict, token: str) -> httpx.Response:
+def send_evaluation_callback_task(self, url: str, token: str, payload: dict):
     headers = {
         "Content-Type": "application/json",
         "X-Internal-Token": token,
@@ -69,61 +63,11 @@ def _post_with_retry(url: str, payload: dict, token: str) -> httpx.Response:
 
     with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as client:
         response = client.post(url, json=payload, headers=headers)
-        _raise_for_server_errors(response)
+        if response.status_code >= 500:
+            raise httpx.HTTPStatusError(
+                f"Server error {response.status_code}", request=response.request, response=response
+            )
         response.raise_for_status()
-        return response
-
-
-def _raise_for_server_errors(response: httpx.Response) -> None:
-    if response.status_code >= SERVER_ERROR_THRESHOLD:
-        raise httpx.HTTPStatusError(f"Server error {response.status_code}", request=response.request, response=response)
-
-
-def _resolve_callback_url(provided_url: str) -> str:
-    return provided_url or getattr(settings, "webhook_callback_url", "http://nginx/api/internal/evaluation-result")
-
-
-def _resolve_callback_token(provided_token: str) -> str:
-    return provided_token or settings.callback_token
-
-
-def _get_failed_path() -> pathlib.Path:
-    # Single source of truth: config, fallback to legacy constant only for safety
-    try:
-        return pathlib.Path(settings.failed_callbacks_path)
-    except AttributeError:
-        return pathlib.Path(FAILED_CALLBACKS_LOG_PATH)
-
-
-def _ensure_parent_exists(path: pathlib.Path) -> None:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-
-
-@contextmanager
-def _dlq_lock(log_path: pathlib.Path):
-    lock_path = log_path.with_name(log_path.name + ".lock")
-    _ensure_parent_exists(lock_path)
-    with lock_path.open("a+", encoding="utf-8") as lock_file:
-        try:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            yield
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-
-
-def _log_failed_callback(url: str, payload: dict, error: Exception) -> None:
-    try:
-        log_file = _get_failed_path()
-        _ensure_parent_exists(log_file)
-        with _dlq_lock(log_file):
-            with log_file.open("a", encoding="utf-8") as file_handle:
-                file_handle.write(json.dumps({"url": url, "payload": payload, "error": str(error)}) + "\n")
-        logger.info(f"Logged failed callback to {log_file}")
-    except Exception as log_error:
-        logger.error(f"Failed to log failed callback: {log_error}")
 
 
 def send_callback(
@@ -158,18 +102,13 @@ def send_evaluation_callback(
     evaluation_callback: EvaluationCallback,
 ) -> bool:
     """
-    Send evaluation result back to Orchestrator with retry logic.
-    Returns True on success, False on failure after retries.
+    Send evaluation result back to Orchestrator by enqueuing a Celery task.
+    Returns True immediately.
     """
     resolved_url = _resolve_callback_url(callback_url)
     resolved_token = _resolve_callback_token(callback_token)
     payload = evaluation_callback.to_payload(resolved_token)
 
-    try:
-        response = _post_with_retry(resolved_url, payload, resolved_token)
-        logger.info(f"Callback successful: {response.status_code} {response.text[:RESPONSE_PREVIEW_LENGTH]}")
-        return True
-    except Exception as callback_error:
-        logger.error(f"Callback failed after retries: {callback_error}")
-        _log_failed_callback(resolved_url, payload, callback_error)
-        return False
+    send_evaluation_callback_task.delay(resolved_url, resolved_token, payload)
+    logger.info(f"Enqueued callback task for submissionId={payload.get('submissionId')}")
+    return True

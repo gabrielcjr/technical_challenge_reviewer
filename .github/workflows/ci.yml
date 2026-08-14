@@ -76,7 +76,7 @@ jobs:
 
       - name: Start all services
         run: |
-          docker compose up -d django nginx evaluator django-worker frontend
+          docker compose up -d redis django nginx evaluator evaluator-worker celery-worker frontend
           docker compose ps
           # Give services a moment to initialize
           sleep 10
@@ -139,8 +139,12 @@ jobs:
           docker compose logs --tail=200 nginx || true
           echo "=== evaluator logs ==="
           docker compose logs --tail=200 evaluator || true
-          echo "=== django-worker logs ==="
-          docker compose logs --tail=200 django-worker || true
+          echo "=== evaluator-worker logs ==="
+          docker compose logs --tail=200 evaluator-worker || true
+          echo "=== celery-worker logs ==="
+          docker compose logs --tail=200 celery-worker || true
+          echo "=== redis logs ==="
+          docker compose logs --tail=200 redis || true
 
       - name: Tear down
         if: always()

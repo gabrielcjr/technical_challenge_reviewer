@@ -1,55 +1,61 @@
+from unittest.mock import patch
+
+import pytest
 import respx
-from app.webhook_client import send_callback
-from httpx import Response
+from app.webhook_client import (
+    EvaluationCallback,
+    send_callback,
+    send_evaluation_callback_task,
+)
+from httpx import HTTPStatusError, Response
+
+
+def test_callback_enqueues_task():
+    """Test that send_callback enqueues a Celery task instead of sending directly."""
+    with patch("app.webhook_client.send_evaluation_callback_task.delay") as mock_delay:
+        success = send_callback(
+            callback_url="http://test/api/result",
+            callback_token="secret",
+            submission_id="test-id",
+            approved=True,
+            summary="Good job",
+            improvements=["Add tests"],
+            reasoning="All good",
+        )
+
+        assert success is True
+        mock_delay.assert_called_once()
+        args, _ = mock_delay.call_args
+        assert args[0] == "http://test/api/result"
+        assert args[1] == "secret"
+        assert args[2]["submissionId"] == "test-id"
+        assert args[2]["approved"] is True
 
 
 @respx.mock
-def test_callback_success():
-    respx.post("http://nginx/api/internal/evaluation-result").mock(return_value=Response(200, json={"status": "ok"}))
+def test_send_evaluation_callback_task_success():
+    """Test that the Celery task successfully sends the HTTP POST request."""
+    route = respx.post("http://test/api/result").mock(return_value=Response(200, json={"status": "ok"}))
 
-    success = send_callback(
-        callback_url="http://nginx/api/internal/evaluation-result",
-        callback_token="secret",
-        submission_id="test-id",
-        approved=True,
-        summary="Good job",
-        improvements=["Add tests"],
-        reasoning="All good",
-    )
+    payload = {"submissionId": "test-id", "approved": True}
+    send_evaluation_callback_task("http://test/api/result", "secret", payload)
 
-    assert success is True
+    assert route.called
+    assert route.calls.last.request.headers["X-Internal-Token"] == "secret"
 
 
 @respx.mock
-def test_callback_failure_retries():
-    # Simulate 500 errors, should retry and eventually fail and log
-    respx.post("http://nginx/api/internal/evaluation-result").mock(return_value=Response(500, text="Server error"))
+def test_send_evaluation_callback_task_failure_raises():
+    """Test that the Celery task raises an exception on HTTP error to trigger retries."""
+    respx.post("http://test/api/result").mock(return_value=Response(500, text="Server error"))
 
-    success = send_callback(
-        callback_url="http://nginx/api/internal/evaluation-result",
-        callback_token="secret",
-        submission_id="test-id",
-        approved=False,
-        summary="Failed",
-        improvements=[],
-        reasoning="Error",
-    )
-
-    # Should return False after retries
-    assert success is False
-
-
-def test_callback_payload_structure():
-    # Ensure payload contains required fields
-    import app.webhook_client as client_module
-
-    # We can't easily intercept payload without mocking _post_with_retry, but test that function exists
-    assert hasattr(client_module, "send_callback")
+    payload = {"submissionId": "test-id", "approved": False}
+    with pytest.raises(HTTPStatusError):
+        send_evaluation_callback_task("http://test/api/result", "secret", payload)
 
 
 def test_evaluation_callback_includes_failed_flag():
-    from app.webhook_client import EvaluationCallback
-
+    """Ensure the callback payload formats correctly."""
     callback = EvaluationCallback(
         submission_id="sub-1",
         approved=False,
@@ -63,29 +69,3 @@ def test_evaluation_callback_includes_failed_flag():
     assert payload["submissionId"] == "sub-1"
     assert payload["approved"] is False
     assert payload["callbackToken"] == "token"
-
-
-@respx.mock
-def test_callback_success_with_failed_flag():
-    route = respx.post("http://nginx/api/internal/evaluation-result").mock(
-        return_value=Response(200, json={"status": "ok", "submissionStatus": "failed"})
-    )
-
-    success = send_callback(
-        callback_url="http://nginx/api/internal/evaluation-result",
-        callback_token="secret",
-        submission_id="test-id",
-        approved=False,
-        summary="Evaluation failed",
-        improvements=[],
-        reasoning="error",
-        failed=True,
-    )
-
-    assert success is True
-    assert route.called
-    body = route.calls.last.request.content
-    import json
-
-    data = json.loads(body)
-    assert data["failed"] is True
