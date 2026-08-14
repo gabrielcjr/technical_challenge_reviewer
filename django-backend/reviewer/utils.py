@@ -30,9 +30,7 @@ def dispatch_evaluation(submission: Submission) -> None:
             "Content-Type": "application/json",
             "X-Internal-Token": getattr(settings, "CALLBACK_TOKEN", "default_secret_callback_token_123"),
         }
-        evaluator_url = (
-            getattr(settings, "EVALUATOR_SERVICE_URL", "http://evaluator:8000").rstrip("/") + "/evaluate"
-        )
+        evaluator_url = getattr(settings, "EVALUATOR_SERVICE_URL", "http://evaluator:8000").rstrip("/") + "/evaluate"
 
         try:
             logger.info(f"Posting evaluation request to {evaluator_url} for submission {submission.id}")

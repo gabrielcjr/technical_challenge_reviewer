@@ -120,10 +120,7 @@ REST_FRAMEWORK = {
 # Custom Service Environment Variables
 CALLBACK_TOKEN = os.environ.get("CALLBACK_TOKEN", "default_secret_callback_token_123")
 EVALUATOR_SERVICE_URL = os.environ.get("EVALUATOR_SERVICE_URL", "http://evaluator:8000")
-WEBHOOK_CALLBACK_URL = (
-    os.environ.get("WEBHOOK_CALLBACK_URL")
-    or "http://nginx/api/internal/evaluation-result"
-)
+WEBHOOK_CALLBACK_URL = os.environ.get("WEBHOOK_CALLBACK_URL") or "http://nginx/api/internal/evaluation-result"
 
 # Security Headers & Cookies (Enforcing mandatory secure coding rules)
 SECURE_CONTENT_TYPE_NOSNIFF = True

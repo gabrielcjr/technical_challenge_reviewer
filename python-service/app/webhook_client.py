@@ -80,10 +80,7 @@ def _raise_for_server_errors(response: httpx.Response) -> None:
 
 
 def _resolve_callback_url(provided_url: str) -> str:
-    return (
-        provided_url
-        or getattr(settings, "webhook_callback_url", "http://nginx/api/internal/evaluation-result")
-    )
+    return provided_url or getattr(settings, "webhook_callback_url", "http://nginx/api/internal/evaluation-result")
 
 
 def _resolve_callback_token(provided_token: str) -> str:

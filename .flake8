@@ -1,4 +1,4 @@
 [flake8]
 max-line-length = 120
-exclude = .git,__pycache__,.venv,venv,migrations,node_modules,build,dist,.docker
+exclude = .git,__pycache__,.venv,venv,venv_django,migrations,node_modules,build,dist,.docker
 ignore = E203, W503, E501
