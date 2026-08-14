@@ -39,7 +39,7 @@ class CeleryTaskTestCase(TestCase):
         self.assertIn("Evaluator responded with status 500", str(context.exception))
         mock_post.assert_called_once()
 
-    @patch("reviewer.utils.process_evaluation_task.delay")
+    @patch("reviewer.tasks.process_evaluation_task.delay")
     def test_dispatch_evaluation_enqueues_task(self, mock_delay):
         dispatch_evaluation(self.submission)
 
