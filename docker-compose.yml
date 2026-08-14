@@ -90,7 +90,7 @@ services:
       dockerfile: Dockerfile
     container_name: challenge_evaluator_worker
     restart: unless-stopped
-    command: ["sh", "-c", "celery -A app.celery_app worker -l info"]
+    command: ["sh", "-c", "celery -A app.celery_app worker -Q evaluator_queue -l info"]
     volumes:
       - ./python-service/app:/app/app
     env_file:
@@ -131,7 +131,7 @@ services:
       EVALUATOR_SERVICE_URL: http://evaluator:8000
       WEBHOOK_CALLBACK_URL: http://nginx/api/internal/evaluation-result
       CELERY_BROKER_URL: redis://redis:6379/0
-    command: ["sh", "-c", "celery -A config worker -l info"]
+    command: ["sh", "-c", "celery -A config worker -Q django_queue -l info"]
     networks:
       - app-network
 

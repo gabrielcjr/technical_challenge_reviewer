@@ -7,6 +7,7 @@ broker_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
 celery_app = Celery("evaluator_worker", broker=broker_url, include=["app.webhook_client"])
 
 celery_app.conf.update(
+    task_default_queue="evaluator_queue",
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
